@@ -1,10 +1,14 @@
 /**
- * Cloud MQTT WebSocket Client with Auto-Discovery
- * Real-time cloud communication using MQTT over Secure WebSockets (WSS)
- * Subscribes to wildcard topics to discover and receive data from ANY ESP32.
+ * Cloud MQTT WebSocket Client with Auto-Discovery & Redundant Broker Failover
+ * Connects over Secure WebSockets (WSS) to EMQX / HiveMQ public brokers.
  */
 
 import { PayloadAdapter } from './payload-adapter.js';
+
+const BROKER_FAILOVERS = [
+  'wss://broker.emqx.io:8084/mqtt',
+  'wss://broker.hivemq.com:8884/mqtt'
+];
 
 export class MqttClient {
   constructor(onDataCallback, onStatusChangeCallback, onRawLogCallback, onDeviceDiscoveredCallback) {
@@ -16,8 +20,10 @@ export class MqttClient {
     this.isConnected = false;
     this.stationId = '';
     this.brokerUrl = '';
+    this.brokerIndex = 0;
     this.packetCount = 0;
     this.discoveredDevices = new Map();
+    this.connectTimeoutTimer = null;
   }
 
   connect(brokerUrl, stationId = '') {
@@ -27,7 +33,7 @@ export class MqttClient {
       } catch (e) {}
     }
 
-    this.brokerUrl = brokerUrl.trim();
+    this.brokerUrl = brokerUrl.trim() || BROKER_FAILOVERS[0];
     this.stationId = stationId.trim();
     this.packetCount = 0;
 
@@ -40,25 +46,38 @@ export class MqttClient {
     }
 
     if (this.onStatusChangeCallback) {
-      this.onStatusChangeCallback(false, 'Connecting to Cloud Broker...');
+      this.onStatusChangeCallback(false, `Connecting to Cloud Broker...`);
+    }
+    if (this.onRawLogCallback) {
+      this.onRawLogCallback('SYSTEM', `Initiating WSS connection to ${this.brokerUrl}`);
     }
 
-    const clientId = 'web-client-' + Math.random().toString(16).substring(2, 10);
+    const clientId = 'web_wqm_' + Math.random().toString(16).substring(2, 10);
 
     const options = {
       clientId: clientId,
       clean: true,
-      connectTimeout: 7000,
-      reconnectPeriod: 4000
+      connectTimeout: 8000,
+      reconnectPeriod: 5000,
+      keepalive: 30
     };
 
     try {
       this.client = mqtt.connect(this.brokerUrl, options);
 
+      // Failover timer: if not connected within 8 seconds, attempt next broker in list
+      clearTimeout(this.connectTimeoutTimer);
+      this.connectTimeoutTimer = setTimeout(() => {
+        if (!this.isConnected) {
+          console.warn(`Connection to ${this.brokerUrl} timed out. Trying alternative broker...`);
+          this.tryNextBroker();
+        }
+      }, 8500);
+
       this.client.on('connect', () => {
+        clearTimeout(this.connectTimeoutTimer);
         this.isConnected = true;
 
-        // Subscribe to Wildcard Topics to automatically discover ANY ESP32
         const topics = [
           'water-quality/+/telemetry',
           'water-quality/+/data',
@@ -72,10 +91,10 @@ export class MqttClient {
         this.client.subscribe(topics, (err) => {
           if (!err) {
             if (this.onStatusChangeCallback) {
-              this.onStatusChangeCallback(true, `Connected to Cloud Broker (Auto-Discovery Active)`);
+              this.onStatusChangeCallback(true, `Cloud Live: Connected (${new URL(this.brokerUrl).hostname})`);
             }
             if (this.onRawLogCallback) {
-              this.onRawLogCallback('SYSTEM', `Listening on wildcard topics: ${topics.join(', ')}`);
+              this.onRawLogCallback('SYSTEM', `Connected to broker! Listening for all ESP32 nodes...`);
             }
           } else {
             console.error('Subscription error', err);
@@ -91,21 +110,17 @@ export class MqttClient {
           this.onRawLogCallback('MQTT', `[${topic}] ${msgStr}`);
         }
 
-        // Extract potential device ID from MQTT topic (e.g. water-quality/<DEVICE_ID>/telemetry)
         const parts = topic.split('/');
         let topicDeviceId = '';
         if (parts.length >= 2 && parts[0] === 'water-quality') {
           topicDeviceId = parts[1];
         }
 
-        // Normalize using universal adapter
         const packet = PayloadAdapter.normalize(msgStr, 'cloud-mqtt', topicDeviceId);
         if (!packet) return;
 
-        // Register device in discovered list
         this.registerDevice(packet.deviceId, packet.rssi);
 
-        // Emit normalized telemetry packet
         if (this.onDataCallback) {
           this.onDataCallback(packet);
         }
@@ -113,15 +128,15 @@ export class MqttClient {
 
       this.client.on('error', (err) => {
         console.warn('MQTT Connection error:', err);
-        if (this.onStatusChangeCallback) {
-          this.onStatusChangeCallback(false, 'Connection Error');
+        if (!this.isConnected) {
+          this.tryNextBroker();
         }
       });
 
       this.client.on('offline', () => {
         this.isConnected = false;
         if (this.onStatusChangeCallback) {
-          this.onStatusChangeCallback(false, 'Broker Offline / Reconnecting...');
+          this.onStatusChangeCallback(false, 'Broker Reconnecting...');
         }
       });
 
@@ -131,9 +146,19 @@ export class MqttClient {
 
     } catch (err) {
       console.error('MQTT setup exception', err);
-      if (this.onStatusChangeCallback) {
-        this.onStatusChangeCallback(false, err.message);
+      this.tryNextBroker();
+    }
+  }
+
+  tryNextBroker() {
+    this.brokerIndex = (this.brokerIndex + 1) % BROKER_FAILOVERS.length;
+    const nextUrl = BROKER_FAILOVERS[this.brokerIndex];
+    if (nextUrl !== this.brokerUrl) {
+      console.log(`Failing over to alternative broker: ${nextUrl}`);
+      if (this.onRawLogCallback) {
+        this.onRawLogCallback('SYSTEM', `Failing over to ${nextUrl}...`);
       }
+      this.connect(nextUrl, this.stationId);
     }
   }
 
@@ -153,6 +178,27 @@ export class MqttClient {
     }
   }
 
+  /**
+   * Publishes a synthetic test packet from the browser to test end-to-end MQTT communication
+   */
+  sendTestPacket() {
+    if (!this.client || !this.isConnected) return false;
+    const testId = 'ESP32_TestNode';
+    const topic = `water-quality/${testId}/telemetry`;
+    const payload = JSON.stringify({
+      deviceId: testId,
+      ph: 7.25,
+      turbidity: 1.45,
+      tds: 195,
+      temp: 24.2,
+      dissolvedOxygen: 7.9,
+      waterLevel: 88,
+      rssi: -50
+    });
+    this.client.publish(topic, payload);
+    return true;
+  }
+
   publishControl(targetDeviceId, command, payload = {}) {
     if (!this.client || !this.isConnected) return false;
     const topic = `water-quality/${targetDeviceId}/control`;
@@ -162,6 +208,7 @@ export class MqttClient {
   }
 
   disconnect() {
+    clearTimeout(this.connectTimeoutTimer);
     if (this.client) {
       this.client.end();
       this.client = null;

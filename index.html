@@ -90,6 +90,10 @@
           Cloud MQTT
         </button>
 
+        <button id="btnTestMqtt" class="btn btn-secondary" style="font-size: 0.78rem; padding: 0.5rem 0.75rem;" title="Send a test packet to verify MQTT cloud connectivity">
+          Test Packet
+        </button>
+
         <!-- Alarm Audio Chime Toggle -->
         <button id="btnToggleAudio" class="btn btn-amber" title="Toggle audio chime on hazard threshold alerts">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -204,7 +208,7 @@
             </div>
             <div class="meta-item">
               <div class="meta-label">Cloud Broker Host</div>
-              <div id="currentBrokerDisplay" class="meta-val mono">broker.hivemq.com</div>
+              <div id="currentBrokerDisplay" class="meta-val mono">broker.emqx.io</div>
             </div>
             <div class="meta-item">
               <div class="meta-label">Telemetry Source</div>
@@ -676,7 +680,7 @@
         <div class="form-grid-2">
           <div class="form-group">
             <label class="form-label" for="fwBroker">MQTT Broker Host</label>
-            <input type="text" id="fwBroker" class="form-input" value="broker.hivemq.com">
+            <input type="text" id="fwBroker" class="form-input" value="broker.emqx.io">
           </div>
 
           <div class="form-group">

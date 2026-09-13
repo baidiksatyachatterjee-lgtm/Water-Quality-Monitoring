@@ -6,11 +6,11 @@
 export class FirmwareGenerator {
   static generateCode(config) {
     const {
-      boardType = 'esp32', // 'esp32' | 'esp32s2' | 'esp32s3' | 'esp32c3'
+      boardType = 'esp32',
       ssid = 'YOUR_WIFI_SSID',
       password = 'YOUR_WIFI_PASSWORD',
       stationId = 'AUTO_MAC',
-      mqttBroker = 'broker.hivemq.com',
+      mqttBroker = 'broker.emqx.io',
       mqttPort = 1883,
       pinPH = 34,
       pinTurbidity = 35,
@@ -44,7 +44,7 @@ export class FirmwareGenerator {
 const char* WIFI_SSID     = "${ssid}";
 const char* WIFI_PASSWORD = "${password}";
 
-// Cloud MQTT Broker
+// High-Reliability Public MQTT Broker
 const char* MQTT_BROKER   = "${mqttBroker}";
 const int   MQTT_PORT     = ${mqttPort};
 
@@ -126,28 +126,29 @@ void initDeviceID() {
 
 void setupWiFi() {
   if (String(WIFI_SSID) == "YOUR_WIFI_SSID" || strlen(WIFI_SSID) == 0) {
-    Serial.println("\\n[INFO] Wi-Fi SSID not configured. Streaming over USB Serial directly at 115200 baud.");
+    Serial.println("\\n[!] WARNING: WIFI_SSID is not configured! Please enter your Wi-Fi details.");
+    Serial.println("[!] Streaming over USB Serial mode at 115200 baud.");
     return;
   }
 
-  Serial.print("Connecting to Wi-Fi: ");
+  Serial.print("[WiFi] Connecting to: ");
   Serial.println(WIFI_SSID);
 
   WiFi.mode(WIFI_STA);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
 
   int retries = 0;
-  while (WiFi.status() != WL_CONNECTED && retries < 20) {
+  while (WiFi.status() != WL_CONNECTED && retries < 25) {
     delay(500);
     Serial.print(".");
     retries++;
   }
 
   if (WiFi.status() == WL_CONNECTED) {
-    Serial.println("\\n[OK] Connected! IP: ");
+    Serial.println("\\n[WiFi] Connected! IP: ");
     Serial.println(WiFi.localIP());
   } else {
-    Serial.println("\\n[WARN] Wi-Fi timed out. Continuing in USB Serial mode.");
+    Serial.println("\\n[WiFi] Timed out. Continuing in USB Serial mode.");
   }
 }
 
@@ -160,14 +161,14 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
 void reconnectMQTT() {
   if (WiFi.status() != WL_CONNECTED) return;
   while (!mqttClient.connected()) {
-    Serial.print("Connecting to MQTT broker...");
+    Serial.print("[MQTT] Connecting to broker...");
     String clientId = DEVICE_ID + "-" + String(random(0xffff), HEX);
     if (mqttClient.connect(clientId.c_str())) {
-      Serial.println(" Connected!");
+      Serial.println(" Connected to broker.emqx.io!");
       mqttClient.subscribe(TOPIC_CONTROL.c_str());
     } else {
-      Serial.println(" Retrying in 5s...");
-      delay(5000);
+      Serial.println(" Retrying in 4s...");
+      delay(4000);
     }
   }
 }
@@ -187,6 +188,7 @@ void setup() {
   Serial.println("\\n========================================================");
   Serial.println("   AquaPulse Universal ESP32 Telemetry Node Active     ");
   Serial.print  ("   Device ID       : "); Serial.println(DEVICE_ID);
+  Serial.print  ("   MQTT Broker     : "); Serial.println(MQTT_BROKER);
   Serial.print  ("   Telemetry Topic : "); Serial.println(TOPIC_TELEMETRY);
   Serial.println("========================================================\\n");
 
@@ -235,6 +237,8 @@ void loop() {
     // 2. Publish to Cloud MQTT
     if (WiFi.status() == WL_CONNECTED && mqttClient.connected()) {
       mqttClient.publish(TOPIC_TELEMETRY.c_str(), buffer);
+      Serial.print("[MQTT Published] -> ");
+      Serial.println(buffer);
     }
   }
 }

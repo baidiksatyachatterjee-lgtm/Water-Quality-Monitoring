@@ -2,7 +2,7 @@
  * =========================================================================
  * UNIVERSAL ESP32 SMART WATER QUALITY MONITORING NODE
  * Compatible with ANY ESP32 board (Classic, S2, S3, C3)
- * 
+ *
  * Key Features:
  *  - Auto-generated unique Device ID from Hardware Silicon MAC address
  *  - Works out-of-the-box via USB Web Serial (no Wi-Fi setup needed)
@@ -10,7 +10,7 @@
  *  - Built-in Wi-Fi SoftAP fallback for phone configuration
  *  - Multi-sensor ADC smoothing filter (pH, Turbidity, TDS, Temp)
  * =========================================================================
- * 
+ *
  * Required Arduino Libraries (Install via Arduino Library Manager):
  *  - PubSubClient by Nick O'Leary
  *  - ArduinoJson by Benoit Blanchon (v6.x or v7.x)
@@ -18,48 +18,50 @@
  *  - DallasTemperature by Miles Burton
  */
 
-#include <WiFi.h>
-#include <PubSubClient.h>
 #include <ArduinoJson.h>
-#include <OneWire.h>
 #include <DallasTemperature.h>
+#include <OneWire.h>
+#include <PubSubClient.h>
+#include <WiFi.h>
 
 // ---------- WI-FI CONFIGURATION ----------
-// You can enter your Wi-Fi credentials here, OR leave them to use USB Serial / SoftAP setup
-const char* WIFI_SSID     = "YOUR_WIFI_SSID";
-const char* WIFI_PASSWORD = "YOUR_WIFI_PASSWORD";
+// You can enter your Wi-Fi credentials here, OR leave them to use USB Serial /
+// SoftAP setup
+const char *WIFI_SSID = "YOUR_WIFI_SSID";
+const char *WIFI_PASSWORD = "YOUR_WIFI_PASSWORD";
 
 // HiveMQ public cloud broker (Port 1883 TCP; Web app uses WSS 8884)
-const char* MQTT_BROKER   = "broker.hivemq.com";
-const int   MQTT_PORT     = 1883;
+const char *MQTT_BROKER = "broker.hivemq.com";
+const int MQTT_PORT = 1883;
 
 // ---------- DYNAMIC DEVICE IDENTIFIER ----------
-// Dynamically filled in setup() using the ESP32's unique factory silicon MAC address
+// Dynamically filled in setup() using the ESP32's unique factory silicon MAC
+// address
 String DEVICE_ID = "ESP32_DEV";
 String TOPIC_TELEMETRY = "";
-String TOPIC_CONTROL   = "";
+String TOPIC_CONTROL = "";
 
 // ---------- HARDWARE PIN MAPPINGS ----------
 // Note: Use ADC1 pins (32-39) so analog reading works concurrently with Wi-Fi!
 #if defined(CONFIG_IDF_TARGET_ESP32C3)
-  const int PIN_PH        = 0;  // ADC1_CH0
-  const int PIN_TURBIDITY = 1;  // ADC1_CH1
-  const int PIN_TDS       = 2;  // ADC1_CH2
-  const int PIN_ONE_WIRE  = 4;  // Digital 1-Wire
-  const int PIN_LED       = 8;  // Status LED
+const int PIN_PH = 0;        // ADC1_CH0
+const int PIN_TURBIDITY = 1; // ADC1_CH1
+const int PIN_TDS = 2;       // ADC1_CH2
+const int PIN_ONE_WIRE = 4;  // Digital 1-Wire
+const int PIN_LED = 8;       // Status LED
 #elif defined(CONFIG_IDF_TARGET_ESP32S2) || defined(CONFIG_IDF_TARGET_ESP32S3)
-  const int PIN_PH        = 4;  // ADC1_CH3
-  const int PIN_TURBIDITY = 5;  // ADC1_CH4
-  const int PIN_TDS       = 6;  // ADC1_CH5
-  const int PIN_ONE_WIRE  = 7;  // Digital 1-Wire
-  const int PIN_LED       = 2;  // Status LED
+const int PIN_PH = 4;        // ADC1_CH3
+const int PIN_TURBIDITY = 5; // ADC1_CH4
+const int PIN_TDS = 6;       // ADC1_CH5
+const int PIN_ONE_WIRE = 7;  // Digital 1-Wire
+const int PIN_LED = 2;       // Status LED
 #else
-  // Standard ESP32 DevKit / NodeMCU-32S / ESP-WROOM-32
-  const int PIN_PH        = 34; // ADC1_CH6
-  const int PIN_TURBIDITY = 35; // ADC1_CH7
-  const int PIN_TDS       = 32; // ADC1_CH4
-  const int PIN_ONE_WIRE  = 4;  // Digital GPIO 4 (Requires 4.7k pullup resistor)
-  const int PIN_LED       = 2;  // Status LED
+// Standard ESP32 DevKit / NodeMCU-32S / ESP-WROOM-32
+const int PIN_PH = 34;        // ADC1_CH6
+const int PIN_TURBIDITY = 35; // ADC1_CH7
+const int PIN_TDS = 32;       // ADC1_CH4
+const int PIN_ONE_WIRE = 4;   // Digital GPIO 4 (Requires 4.7k pullup resistor)
+const int PIN_LED = 2;        // Status LED
 #endif
 
 // ---------- HARDWARE DRIVERS ----------
@@ -88,8 +90,10 @@ float readPH() {
   float rawADC = readSmoothedADC(PIN_PH);
   float voltage = rawADC * (3.3 / 4095.0);
   float phValue = 3.5 * voltage; // Two-point calibration standard
-  if (phValue < 0.0) phValue = 0.0;
-  if (phValue > 14.0) phValue = 14.0;
+  if (phValue < 0.0)
+    phValue = 0.0;
+  if (phValue > 14.0)
+    phValue = 14.0;
   return phValue;
 }
 
@@ -98,9 +102,12 @@ float readTurbidity() {
   float rawADC = readSmoothedADC(PIN_TURBIDITY);
   float voltage = rawADC * (3.3 / 4095.0);
   float ntu = -1120.4 * (voltage * voltage) + 5742.3 * voltage - 4352.9;
-  if (voltage > 2.5) ntu = (2.5 - voltage) * 10.0;
-  if (ntu < 0) ntu = 0.5;
-  if (ntu > 1000) ntu = 1000;
+  if (voltage > 2.5)
+    ntu = (2.5 - voltage) * 10.0;
+  if (ntu < 0)
+    ntu = 0.5;
+  if (ntu > 1000)
+    ntu = 1000;
   return ntu;
 }
 
@@ -110,10 +117,12 @@ float readTDS(float waterTempC) {
   float voltage = rawADC * (3.3 / 4095.0);
   float compensationCoeff = 1.0 + 0.02 * (waterTempC - 25.0);
   float compensationVoltage = voltage / compensationCoeff;
-  float tds = (133.42 * pow(compensationVoltage, 3) 
-             - 255.86 * pow(compensationVoltage, 2) 
-             + 857.39 * compensationVoltage) * 0.5;
-  if (tds < 0) tds = 0;
+  float tds =
+      (133.42 * pow(compensationVoltage, 3) -
+       255.86 * pow(compensationVoltage, 2) + 857.39 * compensationVoltage) *
+      0.5;
+  if (tds < 0)
+    tds = 0;
   return tds;
 }
 
@@ -133,18 +142,21 @@ void initDeviceID() {
   WiFi.macAddress(mac);
   char idBuffer[32];
   // Auto-generate clean unique ID like ESP32_78E29A
-  snprintf(idBuffer, sizeof(idBuffer), "ESP32_%02X%02X%02X", mac[3], mac[4], mac[5]);
+  snprintf(idBuffer, sizeof(idBuffer), "ESP32_%02X%02X%02X", mac[3], mac[4],
+           mac[5]);
   DEVICE_ID = String(idBuffer);
 
   TOPIC_TELEMETRY = "water-quality/" + DEVICE_ID + "/telemetry";
-  TOPIC_CONTROL   = "water-quality/" + DEVICE_ID + "/control";
+  TOPIC_CONTROL = "water-quality/" + DEVICE_ID + "/control";
 }
 
 // ---------- WI-FI & MQTT CONNECTION ----------
 void setupWiFi() {
   if (String(WIFI_SSID) == "YOUR_WIFI_SSID" || strlen(WIFI_SSID) == 0) {
-    Serial.println("\n[INFO] Wi-Fi SSID not configured. Streaming over USB Serial directly.");
-    Serial.println("[INFO] Web App can connect via 'USB Serial' button right now!");
+    Serial.println("\n[INFO] Wi-Fi SSID not configured. Streaming over USB "
+                   "Serial directly.");
+    Serial.println(
+        "[INFO] Web App can connect via 'USB Serial' button right now!");
     return;
   }
 
@@ -169,12 +181,14 @@ void setupWiFi() {
     Serial.println(WiFi.localIP());
     digitalWrite(PIN_LED, HIGH);
   } else {
-    Serial.println("\n[WARN] Wi-Fi connection timed out. Falling back to USB Serial mode.");
-    Serial.println("[INFO] Telemetry will continue streaming over USB Serial at 115200 baud.");
+    Serial.println("\n[WARN] Wi-Fi connection timed out. Falling back to USB "
+                   "Serial mode.");
+    Serial.println("[INFO] Telemetry will continue streaming over USB Serial "
+                   "at 115200 baud.");
   }
 }
 
-void mqttCallback(char* topic, byte* payload, unsigned int length) {
+void mqttCallback(char *topic, byte *payload, unsigned int length) {
   Serial.print("MQTT Control Message [");
   Serial.print(topic);
   Serial.print("]: ");
@@ -185,12 +199,13 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
 }
 
 void reconnectMQTT() {
-  if (WiFi.status() != WL_CONNECTED) return;
+  if (WiFi.status() != WL_CONNECTED)
+    return;
 
   while (!mqttClient.connected()) {
     Serial.print("Connecting to MQTT broker...");
     String clientId = DEVICE_ID + "-" + String(random(0xffff), HEX);
-    
+
     if (mqttClient.connect(clientId.c_str())) {
       Serial.println(" Connected to Cloud Broker!");
       mqttClient.subscribe(TOPIC_CONTROL.c_str());
@@ -222,8 +237,10 @@ void setup() {
   Serial.println("\n========================================================");
   Serial.println("   AquaPulse Universal ESP32 Water Quality Node         ");
   Serial.println("========================================================");
-  Serial.print("Device Identifier : "); Serial.println(DEVICE_ID);
-  Serial.print("Telemetry Topic   : "); Serial.println(TOPIC_TELEMETRY);
+  Serial.print("Device Identifier : ");
+  Serial.println(DEVICE_ID);
+  Serial.print("Telemetry Topic   : ");
+  Serial.println(TOPIC_TELEMETRY);
   Serial.println("========================================================\n");
 
   setupWiFi();
@@ -254,7 +271,8 @@ void loop() {
     float tdsVal = readTDS(tempC);
     // Calculated dissolved oxygen approximation
     float doVal = 14.6 - 0.3 * tempC;
-    if (doVal < 0) doVal = 0;
+    if (doVal < 0)
+      doVal = 0;
     int rssi = WiFi.status() == WL_CONNECTED ? WiFi.RSSI() : 0;
 
     // Assemble Universal JSON Packet

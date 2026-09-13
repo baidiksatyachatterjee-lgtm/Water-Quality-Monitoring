@@ -67,12 +67,13 @@ export class StorageManager {
 
   initDefaults() {
     if (!this.getStationId()) {
-      // Auto-generate a clean random Station ID if none exists
-      const randId = 'esp32-wqm-' + Math.random().toString(36).substring(2, 7);
+      const randId = 'ESP32_' + Math.random().toString(36).substring(2, 6).toUpperCase();
       this.setStationId(randId);
     }
-    if (!this.getBrokerUrl()) {
-      this.setBrokerUrl('wss://broker.hivemq.com:8884/mqtt');
+    // High-reliability public EMQX broker with WSS port 8084
+    const currentBroker = localStorage.getItem(STORAGE_KEYS.MQTT_BROKER);
+    if (!currentBroker || currentBroker.includes('hivemq')) {
+      this.setBrokerUrl('wss://broker.emqx.io:8084/mqtt');
     }
     if (!this.getThresholds()) {
       this.setPreset('drinking');
@@ -90,7 +91,7 @@ export class StorageManager {
   }
 
   getBrokerUrl() {
-    return localStorage.getItem(STORAGE_KEYS.MQTT_BROKER) || 'wss://broker.hivemq.com:8884/mqtt';
+    return localStorage.getItem(STORAGE_KEYS.MQTT_BROKER) || 'wss://broker.emqx.io:8084/mqtt';
   }
 
   setBrokerUrl(url) {

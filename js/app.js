@@ -52,9 +52,14 @@ class WaterQualityApp {
     this.initFirmwareGeneratorView();
     this.handleUrlParameters();
 
-    // Default start simulation unless URL says otherwise
+    // If deployed online (e.g. *.vercel.app, *.github.io), automatically start Cloud MQTT!
+    const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
     if (this.activeSource === 'none') {
-      this.startSimulation();
+      if (isLocalhost) {
+        this.startSimulation();
+      } else {
+        this.connectMQTT();
+      }
     }
   }
 
@@ -575,6 +580,16 @@ class WaterQualityApp {
     document.getElementById('btnModeSim')?.addEventListener('click', () => this.startSimulation());
     document.getElementById('btnModeSerial')?.addEventListener('click', () => this.connectSerial());
     document.getElementById('btnModeMqtt')?.addEventListener('click', () => this.connectMQTT());
+
+    // Test MQTT packet button
+    document.getElementById('btnTestMqtt')?.addEventListener('click', () => {
+      if (!this.mqtt.isConnected) {
+        this.connectMQTT();
+      }
+      setTimeout(() => {
+        this.mqtt.sendTestPacket();
+      }, 500);
+    });
 
     // Device Selector change
     document.getElementById('deviceSelector')?.addEventListener('change', (e) => {

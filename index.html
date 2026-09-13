@@ -4,9 +4,9 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="theme-color" content="#060b14">
-  <meta name="description" content="Real-time ESP32 IoT Water Quality Monitoring Dashboard with Live Cloud MQTT, Web Serial USB connection, Water Quality Index (WQI) scoring, and automated firmware generator.">
-  <meta name="keywords" content="ESP32, Water Quality Monitoring, IoT, MQTT, Web Serial, pH, Turbidity, TDS, Arduino">
-  <title>AquaPulse IoT — ESP32 Water Quality Monitoring</title>
+  <meta name="description" content="Universal ESP32 IoT Water Quality Monitoring Dashboard with Live Cloud MQTT Auto-Discovery, Web Serial USB connection, Water Quality Index (WQI) scoring, and automated firmware generator for any ESP32.">
+  <meta name="keywords" content="ESP32, Water Quality Monitoring, IoT, MQTT, Web Serial, pH, Turbidity, TDS, Arduino, ESP32-S3, ESP32-C3">
+  <title>AquaPulse IoT — Universal ESP32 Water Quality Monitoring</title>
 
   <!-- Google Fonts: Outfit (Display), Inter (Body), JetBrains Mono (Code/Telemetry) -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -36,9 +36,18 @@
           </svg>
         </div>
         <div class="brand-text">
-          <h1>AquaPulse IoT <span class="brand-badge">ESP32 Live</span></h1>
-          <p>Autonomous Water Quality & Hydrological Telemetry System</p>
+          <h1>AquaPulse IoT <span class="brand-badge">Any ESP32</span></h1>
+          <p>Universal Multi-ESP32 Hydrological Telemetry Dashboard</p>
         </div>
+      </div>
+
+      <!-- Universal ESP32 Auto-Discovery Device Selector -->
+      <div class="device-selector-wrapper" title="Switch between any detected ESP32 broadcasting online">
+        <span class="device-selector-label">Device:</span>
+        <select id="deviceSelector" class="device-selector" aria-label="Select ESP32 Device">
+          <option value="auto">Auto-Detect Active ESP32</option>
+        </select>
+        <span id="deviceCountBadge" class="brand-badge" style="display:none;">1 Online</span>
       </div>
 
       <div class="header-actions">
@@ -56,17 +65,25 @@
           Simulation
         </button>
 
-        <button id="btnModeSerial" class="btn btn-secondary" title="Connect ESP32 via USB Serial">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <rect x="2" y="2" width="20" height="8" rx="2" ry="2"></rect>
-            <rect x="2" y="14" width="20" height="8" rx="2" ry="2"></rect>
-            <line x1="6" y1="6" x2="6.01" y2="6"></line>
-            <line x1="6" y1="18" x2="6.01" y2="18"></line>
-          </svg>
-          USB Serial
-        </button>
+        <div style="display: inline-flex; align-items: center; gap: 0.25rem;">
+          <button id="btnModeSerial" class="btn btn-secondary" title="Connect ANY ESP32 via USB Serial without Wi-Fi">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="2" y="2" width="20" height="8" rx="2" ry="2"></rect>
+              <rect x="2" y="14" width="20" height="8" rx="2" ry="2"></rect>
+              <line x1="6" y1="6" x2="6.01" y2="6"></line>
+              <line x1="6" y1="18" x2="6.01" y2="18"></line>
+            </svg>
+            USB Serial
+          </button>
+          <select id="serialBaudSelect" class="baud-select" title="Select Serial Baud Rate">
+            <option value="115200" selected>115200</option>
+            <option value="9600">9600</option>
+            <option value="57600">57600</option>
+            <option value="230400">230400</option>
+          </select>
+        </div>
 
-        <button id="btnModeMqtt" class="btn btn-secondary" title="Connect to Cloud MQTT Broker">
+        <button id="btnModeMqtt" class="btn btn-secondary" title="Auto-discover all ESP32s via Cloud MQTT Broker">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"></path>
           </svg>
@@ -83,7 +100,7 @@
         </button>
 
         <!-- Firmware & Wiring Hub Modal Trigger -->
-        <button id="btnOpenFirmwareModal" class="btn btn-cyan-outline" title="Generate customized ESP32 Arduino sketch and view wiring pinouts">
+        <button id="btnOpenFirmwareModal" class="btn btn-cyan-outline" title="Generate universal ESP32 firmware and view wiring pinouts">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <polyline points="16 18 22 12 16 6"></polyline>
             <polyline points="8 6 2 12 8 18"></polyline>
@@ -92,7 +109,7 @@
         </button>
 
         <!-- Thresholds & Presets Settings Modal Trigger -->
-        <button id="btnOpenSettingsModal" class="btn btn-secondary btn-icon-only" title="Configure threshold presets and station ID" aria-label="Settings">
+        <button id="btnOpenSettingsModal" class="btn btn-secondary btn-icon-only" title="Configure threshold presets and broker URL" aria-label="Settings">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <circle cx="12" cy="12" r="3"></circle>
             <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
@@ -176,17 +193,17 @@
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <circle cx="12" cy="12" r="10"></circle>
               <line x1="2" y1="12" x2="22" y2="12"></line>
-              <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
+              <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1 4-10z"></path>
             </svg>
-            Station Telemetry Node
+            Active Node Telemetry
           </div>
           <div class="station-meta-grid">
             <div class="meta-item">
-              <div class="meta-label">Station ID</div>
-              <div id="currentStationDisplay" class="meta-val mono">esp32-wqm-01</div>
+              <div class="meta-label">Active Node ID</div>
+              <div id="currentStationDisplay" class="meta-val mono">Auto-Detect</div>
             </div>
             <div class="meta-item">
-              <div class="meta-label">Active Broker</div>
+              <div class="meta-label">Cloud Broker Host</div>
               <div id="currentBrokerDisplay" class="meta-val mono">broker.hivemq.com</div>
             </div>
             <div class="meta-item">
@@ -247,7 +264,6 @@
           <div class="sensor-card-header">
             <div class="sensor-title-group">
               <div class="sensor-icon-box">
-                <!-- Chemistry Tube SVG -->
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <path d="M10 2v7.31M14 2v7.31M8.5 2h7M14 9.3a6.5 6.5 0 1 1-4 0"></path>
                 </svg>
@@ -292,7 +308,6 @@
           <div class="sensor-card-header">
             <div class="sensor-title-group">
               <div class="sensor-icon-box">
-                <!-- Water Wave SVG -->
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <path d="M2 12s3-4 6-4 6 4 8 4 6-4 6-4M2 18s3-4 6-4 6 4 8 4 6-4 6-4"></path>
                 </svg>
@@ -337,7 +352,6 @@
           <div class="sensor-card-header">
             <div class="sensor-title-group">
               <div class="sensor-icon-box">
-                <!-- Crystal / Hexagon SVG -->
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <polygon points="12 2 2 7 2 17 12 22 22 17 22 7 12 2"></polygon>
                   <line x1="2" y1="7" x2="12" y2="12"></line>
@@ -385,7 +399,6 @@
           <div class="sensor-card-header">
             <div class="sensor-title-group">
               <div class="sensor-icon-box">
-                <!-- Thermometer SVG -->
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <path d="M14 14.76V3.5a2.5 2.5 0 0 0-5 0v11.26a4.5 4.5 0 1 0 5 0z"></path>
                 </svg>
@@ -430,7 +443,6 @@
           <div class="sensor-card-header">
             <div class="sensor-title-group">
               <div class="sensor-icon-box">
-                <!-- Oxygen Molecule SVG -->
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <circle cx="12" cy="12" r="8"></circle>
                   <line x1="12" y1="8" x2="12" y2="16"></line>
@@ -476,7 +488,6 @@
           <div class="sensor-card-header">
             <div class="sensor-title-group">
               <div class="sensor-icon-box">
-                <!-- Gauge / Tank SVG -->
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path>
                 </svg>
@@ -529,7 +540,6 @@
         </div>
 
         <div class="chart-controls">
-          <!-- Parameter Toggle Filters -->
           <div class="dataset-pill-group">
             <button class="dataset-btn active" data-key="all">All Sensors</button>
             <button class="dataset-btn" data-key="ph">pH</button>
@@ -538,7 +548,6 @@
             <button class="dataset-btn" data-key="temp">Temp</button>
           </div>
 
-          <!-- Time Window Filters -->
           <div class="timeframe-pill-group">
             <button class="timeframe-btn active" data-count="30">30 Pts</button>
             <button class="timeframe-btn" data-count="60">60 Pts</button>
@@ -563,7 +572,7 @@
             <polyline points="4 17 10 11 4 5"></polyline>
             <line x1="12" y1="19" x2="20" y2="19"></line>
           </svg>
-          <h3 style="font-size: 1rem; font-weight: 600; color: #ffffff;">Live Telemetry Stream & JSON Packet Inspector</h3>
+          <h3 style="font-size: 1rem; font-weight: 600; color: #ffffff;">Live Multi-Node Telemetry & JSON Packet Stream</h3>
         </div>
 
         <div style="display: flex; align-items: center; gap: 0.5rem;">
@@ -583,7 +592,7 @@
          ========================================================================= -->
     <footer class="footer-bar" role="contentinfo">
       <div>
-        <span>AquaPulse IoT © 2026 — Designed for Environmental & Water Quality Assurance</span>
+        <span>AquaPulse IoT © 2026 — Universal ESP32 Water Quality Monitoring</span>
       </div>
       <div class="footer-links">
         <a href="https://github.com/baidiksatyachatterjee-lgtm/Water-Quality-Monitoring" target="_blank" rel="noopener noreferrer">
@@ -591,7 +600,7 @@
         </a>
         <span>•</span>
         <a href="#btnOpenFirmwareModal" onclick="document.getElementById('btnOpenFirmwareModal').click(); return false;">
-          ESP32 Setup Guide
+          Universal ESP32 Setup Guide
         </a>
       </div>
     </footer>
@@ -599,7 +608,7 @@
   </div> <!-- End .app-wrapper -->
 
   <!-- =========================================================================
-       MODAL 1: ESP32 FIRMWARE GENERATOR & WIRING GUIDE
+       MODAL 1: UNIVERSAL ESP32 FIRMWARE GENERATOR & WIRING GUIDE
        ========================================================================= -->
   <div id="firmwareModal" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="firmwareModalTitle">
     <div class="modal-card">
@@ -617,7 +626,7 @@
             <line x1="1" y1="9" x2="4" y2="9"></line>
             <line x1="1" y1="14" x2="4" y2="14"></line>
           </svg>
-          ESP32 Firmware Generator & Wiring Guide
+          Universal ESP32 Firmware Generator & Wiring Guide
         </h3>
         <button id="btnCloseFirmwareModal" class="modal-close-btn" aria-label="Close modal">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -628,12 +637,31 @@
       </div>
 
       <div class="modal-body">
-        <p style="font-size: 0.85rem; color: var(--text-secondary);">
-          Customize your Wi-Fi credentials, Station ID, and pinout assignments. The C++ sketch automatically updates and compiles with zero modifications required in the Arduino IDE!
-        </p>
+        <div style="background: rgba(0, 242, 254, 0.08); border: 1px solid rgba(0, 242, 254, 0.25); border-radius: var(--radius-md); padding: 0.8rem 1rem;">
+          <p style="font-size: 0.85rem; color: #e0f2fe; margin-bottom: 0.25rem;">
+            <strong>✨ Universal Board Compatibility:</strong> This sketch works with <em>ANY ESP32 board</em> (Classic ESP32, NodeMCU-32S, ESP32-S2, ESP32-S3, ESP32-C3).
+          </p>
+          <p style="font-size: 0.8rem; color: var(--text-secondary);">
+            Leave Station ID as <code>AUTO_MAC</code> to automatically derive unique device identifiers from your board's hardware silicon MAC address. Multiple ESP32s can run the exact same firmware without conflict!
+          </p>
+        </div>
 
-        <!-- Dynamic Firmware Configuration Form -->
         <div class="form-grid-2">
+          <div class="form-group">
+            <label class="form-label" for="fwBoardType">Target ESP32 Model</label>
+            <select id="fwBoardType" class="form-select">
+              <option value="esp32" selected>Standard ESP32 (DevKit / NodeMCU-32S / WROOM)</option>
+              <option value="esp32s3">ESP32-S3</option>
+              <option value="esp32s2">ESP32-S2</option>
+              <option value="esp32c3">ESP32-C3 (RISC-V)</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="fwStationId">Device ID (Leave AUTO_MAC to Auto-Detect)</label>
+            <input type="text" id="fwStationId" class="form-input" value="AUTO_MAC" placeholder="AUTO_MAC or custom name">
+          </div>
+
           <div class="form-group">
             <label class="form-label" for="fwSsid">Wi-Fi Network Name (SSID)</label>
             <input type="text" id="fwSsid" class="form-input" value="YOUR_WIFI_SSID" placeholder="Home or Lab Wi-Fi">
@@ -643,19 +671,14 @@
             <label class="form-label" for="fwPassword">Wi-Fi Password</label>
             <input type="text" id="fwPassword" class="form-input" value="YOUR_WIFI_PASSWORD" placeholder="Wi-Fi Password">
           </div>
+        </div>
 
-          <div class="form-group">
-            <label class="form-label" for="fwStationId">Station Identifier (Must match Web App)</label>
-            <input type="text" id="fwStationId" class="form-input" value="esp32-station-01">
-          </div>
-
+        <div class="form-grid-2">
           <div class="form-group">
             <label class="form-label" for="fwBroker">MQTT Broker Host</label>
             <input type="text" id="fwBroker" class="form-input" value="broker.hivemq.com">
           </div>
-        </div>
 
-        <div class="form-grid-2">
           <div class="form-group">
             <label class="form-label" for="fwPinPH">Analog pH Pin (ADC1)</label>
             <select id="fwPinPH" class="form-select">
@@ -683,16 +706,6 @@
               <option value="33">GPIO 33 (ADC1_CH5)</option>
               <option value="34">GPIO 34 (ADC1_CH6)</option>
               <option value="35">GPIO 35 (ADC1_CH7)</option>
-            </select>
-          </div>
-
-          <div class="form-group">
-            <label class="form-label" for="fwPinTemp">DS18B20 Temp Probe (Digital 1-Wire)</label>
-            <select id="fwPinTemp" class="form-select">
-              <option value="4" selected>GPIO 4</option>
-              <option value="5">GPIO 5</option>
-              <option value="18">GPIO 18</option>
-              <option value="19">GPIO 19</option>
             </select>
           </div>
         </div>
@@ -797,8 +810,8 @@
 
         <div class="form-grid-2">
           <div class="form-group">
-            <label class="form-label" for="settingStationId">Station Unique ID</label>
-            <input type="text" id="settingStationId" class="form-input">
+            <label class="form-label" for="settingStationId">Custom Device Filter</label>
+            <input type="text" id="settingStationId" class="form-input" placeholder="Leave empty for Auto-Detect">
           </div>
 
           <div class="form-group">

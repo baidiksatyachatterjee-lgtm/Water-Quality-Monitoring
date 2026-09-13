@@ -1,6 +1,6 @@
 /**
- * Main Application Orchestrator
- * Coordinates real-time telemetry, WQI calculation, alerting, charting, and hardware clients
+ * Main Application Orchestrator (Universal Multi-ESP32 Edition)
+ * Coordinates auto-discovery, telemetry normalization, WQI calculation, alerting, charting, and multi-device routing.
  */
 
 import { StorageManager, WATER_PRESETS } from './storage.js';
@@ -10,6 +10,7 @@ import { SensorSimulator } from './simulator.js';
 import { SerialClient } from './serial-client.js';
 import { MqttClient } from './mqtt-client.js';
 import { FirmwareGenerator } from './firmware-gen.js';
+import { PayloadAdapter } from './payload-adapter.js';
 
 class WaterQualityApp {
   constructor() {
@@ -21,13 +22,16 @@ class WaterQualityApp {
     this.mqtt = null;
 
     this.activeSource = 'none'; // 'simulation' | 'serial' | 'mqtt' | 'none'
-    this.historyRecords = []; // Max 1000 data points for CSV export
+    this.historyRecords = [];
     this.alertLogs = [];
     this.audioContext = null;
     this.lastAlarmTime = 0;
     this.isAudioMuted = !this.storage.isSoundEnabled();
 
-    // Sparkline history buffers (last 20 points per parameter)
+    // Multi-Device Registry
+    this.discoveredDevices = new Map(); // id -> { id, lastSeen, rssi, packetCount }
+    this.selectedDeviceId = 'auto'; // 'auto' | specific deviceId
+
     this.sparklines = {
       ph: [],
       turbidity: [],
@@ -46,14 +50,42 @@ class WaterQualityApp {
     this.bindUIEvents();
     this.loadStationSettings();
     this.initFirmwareGeneratorView();
+    this.handleUrlParameters();
 
-    // Start with Simulation active by default so the user sees live interactive data immediately
-    this.startSimulation();
+    // Default start simulation unless URL says otherwise
+    if (this.activeSource === 'none') {
+      this.startSimulation();
+    }
+  }
+
+  handleUrlParameters() {
+    const params = new URLSearchParams(window.location.search);
+    const urlDevice = params.get('device');
+    const urlMode = params.get('mode');
+    const urlBroker = params.get('broker');
+
+    if (urlBroker) {
+      this.storage.setBrokerUrl(urlBroker);
+    }
+
+    if (urlDevice) {
+      this.selectedDeviceId = urlDevice.trim();
+      this.registerDevice({ id: this.selectedDeviceId, lastSeen: Date.now(), rssi: -60, packetCount: 0 });
+    }
+
+    if (urlMode === 'mqtt') {
+      this.connectMQTT();
+    } else if (urlMode === 'serial') {
+      this.connectSerial();
+    }
   }
 
   initHardwareClients() {
     // Simulator client
-    this.simulator = new SensorSimulator((data) => this.handleTelemetry(data));
+    this.simulator = new SensorSimulator((data) => {
+      const normalized = PayloadAdapter.normalize(data, 'simulator', 'ESP32_Simulated');
+      this.handleTelemetry(normalized);
+    });
 
     // Serial USB client
     this.serial = new SerialClient(
@@ -62,18 +94,19 @@ class WaterQualityApp {
       (source, raw) => this.appendTerminalLog(source, raw)
     );
 
-    // Cloud MQTT client
+    // Cloud MQTT client with Auto-Discovery
     this.mqtt = new MqttClient(
       (data) => this.handleTelemetry(data),
       (connected, msg) => this.handleConnectionStatus('mqtt', connected, msg),
-      (source, raw) => this.appendTerminalLog(source, raw)
+      (source, raw) => this.appendTerminalLog(source, raw),
+      (deviceInfo, isNew, allDevices) => this.handleDeviceDiscovered(deviceInfo, isNew, allDevices)
     );
   }
 
   loadStationSettings() {
     const stationId = this.storage.getStationId();
     const stationElem = document.getElementById('currentStationDisplay');
-    if (stationElem) stationElem.textContent = stationId;
+    if (stationElem) stationElem.textContent = this.selectedDeviceId === 'auto' ? 'Auto-Detect' : this.selectedDeviceId;
 
     const brokerUrl = this.storage.getBrokerUrl();
     const brokerElem = document.getElementById('currentBrokerDisplay');
@@ -86,17 +119,87 @@ class WaterQualityApp {
       }
     }
 
-    // Sound toggle state
     this.updateAudioButtonState();
+  }
+
+  // =========================================================================
+  // MULTI-DEVICE AUTO-DISCOVERY & FILTERING
+  // =========================================================================
+  handleDeviceDiscovered(deviceInfo, isNew, allDevices) {
+    this.registerDevice(deviceInfo);
+  }
+
+  registerDevice(deviceInfo) {
+    const deviceId = deviceInfo.id;
+    const isNew = !this.discoveredDevices.has(deviceId);
+
+    this.discoveredDevices.set(deviceId, {
+      ...deviceInfo,
+      lastSeen: Date.now()
+    });
+
+    this.updateDeviceSelectorUI();
+
+    if (isNew) {
+      this.appendTerminalLog('DISCOVERY', `New ESP32 Detected: [${deviceId}]`);
+    }
+  }
+
+  updateDeviceSelectorUI() {
+    const selector = document.getElementById('deviceSelector');
+    const badge = document.getElementById('deviceCountBadge');
+    if (!selector) return;
+
+    const count = this.discoveredDevices.size;
+    if (badge) {
+      badge.textContent = `${count} Online`;
+      badge.style.display = count > 0 ? 'inline-flex' : 'none';
+    }
+
+    const currentSelection = this.selectedDeviceId;
+    selector.innerHTML = '';
+
+    // "Auto-Select Active Device" option
+    const autoOpt = document.createElement('option');
+    autoOpt.value = 'auto';
+    autoOpt.textContent = `Auto-Select Active Device (${count} active)`;
+    selector.appendChild(autoOpt);
+
+    // List each detected ESP32
+    for (const [id, info] of this.discoveredDevices.entries()) {
+      const opt = document.createElement('option');
+      opt.value = id;
+      const secondsAgo = Math.round((Date.now() - info.lastSeen) / 1000);
+      opt.textContent = `🟢 ${id} (${info.rssi ? info.rssi + ' dBm' : 'Online'})`;
+      selector.appendChild(opt);
+    }
+
+    selector.value = currentSelection;
   }
 
   // =========================================================================
   // TELEMETRY PROCESSING & WATER QUALITY INDEX (WQI)
   // =========================================================================
   handleTelemetry(packet) {
+    if (!packet) return;
+
+    // Register device in multi-device map
+    this.registerDevice({
+      id: packet.deviceId,
+      rssi: packet.rssi,
+      packetCount: 1
+    });
+
+    // Device filtering: if a specific device is selected and this packet is from another, skip updating gauges
+    if (this.selectedDeviceId !== 'auto' && packet.deviceId !== this.selectedDeviceId) {
+      // Still log to terminal
+      this.appendTerminalLog(packet.source.toUpperCase(), `[${packet.deviceId}] ${JSON.stringify(packet)}`);
+      return;
+    }
+
     const thresholds = this.storage.getThresholds();
 
-    // Calculate individual parameters status
+    // Calculate parameter statuses
     const statusPH = this.checkThreshold(packet.ph, thresholds.ph);
     const statusTurb = this.checkThreshold(packet.turbidity, thresholds.turbidity);
     const statusTDS = this.checkThreshold(packet.tds, thresholds.tds);
@@ -104,7 +207,7 @@ class WaterQualityApp {
     const statusDO = this.checkThreshold(packet.dissolvedOxygen, thresholds.dissolvedOxygen);
     const statusLevel = this.checkThreshold(packet.waterLevel, thresholds.waterLevel);
 
-    // Update individual gauge cards
+    // Update gauge cards
     this.gauges.updateSensorCard('ph', packet.ph, thresholds.ph, statusPH);
     this.gauges.updateSensorCard('turbidity', packet.turbidity, thresholds.turbidity, statusTurb);
     this.gauges.updateSensorCard('tds', packet.tds, thresholds.tds, statusTDS);
@@ -125,7 +228,7 @@ class WaterQualityApp {
     // Update Chart.js stream
     this.charts.addDataPoint(packet.timestamp, packet);
 
-    // Check for Anomaly / Danger triggers
+    // Evaluate hazard thresholds
     this.evaluateAlerts(packet, thresholds, {
       ph: statusPH,
       turbidity: statusTurb,
@@ -137,7 +240,8 @@ class WaterQualityApp {
     // Append to in-memory telemetry history
     const record = {
       timestamp: packet.timestamp,
-      stationId: this.storage.getStationId(),
+      deviceId: packet.deviceId,
+      stationId: packet.deviceId,
       source: packet.source,
       ...packet,
       wqi: wqiScore,
@@ -147,15 +251,20 @@ class WaterQualityApp {
     if (this.historyRecords.length > 1000) this.historyRecords.shift();
 
     // Log to terminal
-    this.appendTerminalLog(packet.source.toUpperCase(), JSON.stringify(packet));
+    this.appendTerminalLog(packet.source.toUpperCase(), `[${packet.deviceId}] ${JSON.stringify(packet)}`);
 
     // Update Meta info
     const lastPktElem = document.getElementById('metaLastPacket');
-    if (lastPktElem) lastPktElem.textContent = packet.timestamp;
+    if (lastPktElem) lastPktElem.textContent = `${packet.timestamp} (Node: ${packet.deviceId})`;
 
     const rssiElem = document.getElementById('metaRssi');
     if (rssiElem && packet.rssi) {
       rssiElem.textContent = `${packet.rssi} dBm`;
+    }
+
+    const stationElem = document.getElementById('currentStationDisplay');
+    if (stationElem) {
+      stationElem.textContent = packet.deviceId;
     }
   }
 
@@ -177,11 +286,7 @@ class WaterQualityApp {
     this.gauges.drawSparkline(canvasId, this.sparklines[key]);
   }
 
-  /**
-   * Standard Weighted Arithmetic Water Quality Index (WQI)
-   */
   calculateWQI(packet, thresholds) {
-    // Weights normalized to sum = 1.0
     const weights = {
       ph: 0.25,
       turbidity: 0.25,
@@ -190,21 +295,11 @@ class WaterQualityApp {
       temp: 0.15
     };
 
-    // Sub-index score calculation (0 - 100 for each, 100 being best)
-    // 1. pH: optimal 7.0 (100). Drops as it deviates from neutral
     const phDev = Math.abs(packet.ph - 7.0);
     const qPH = Math.max(0, 100 - phDev * 28);
-
-    // 2. Turbidity: optimal 0 (100). Drops as turbidity rises
     const qTurb = Math.max(0, 100 - (packet.turbidity / (thresholds.turbidity.max || 5)) * 40);
-
-    // 3. TDS: optimal 100-250 (100).
     const qTDS = Math.max(0, 100 - Math.max(0, (packet.tds - 200) / 6));
-
-    // 4. Dissolved Oxygen: optimal >= 7.5 mg/L (100).
     const qDO = Math.min(100, (packet.dissolvedOxygen / 8.0) * 100);
-
-    // 5. Temp: optimal 22°C
     const tempDev = Math.abs(packet.temp - 22.0);
     const qTemp = Math.max(0, 100 - tempDev * 5);
 
@@ -217,14 +312,14 @@ class WaterQualityApp {
     const roundedWQI = Math.round(Math.max(0, Math.min(100, wqi)));
 
     let status = 'Excellent';
-    let desc = 'Water quality is pristine. All physiological and chemical parameters are in optimal range.';
+    let desc = 'Water quality is pristine. All physiological, chemical, and mineral parameters are within optimal safety bounds.';
 
     if (roundedWQI >= 90) {
       status = 'Excellent';
-      desc = 'Water quality is pristine. Safe for human consumption, aquaculture, and delicate aquatic ecosystems.';
+      desc = 'Water quality is pristine. Safe for human consumption, aquaculture, and sensitive aquatic ecosystems.';
     } else if (roundedWQI >= 75) {
       status = 'Good';
-      desc = 'Water quality is acceptable for domestic use. Normal mineral balance with safe turbidity levels.';
+      desc = 'Water quality is acceptable for domestic and recreational use with safe mineral balance.';
     } else if (roundedWQI >= 55) {
       status = 'Moderate';
       desc = 'Mild water parameter deviation. Filtration recommended before consumption; continuous monitoring advised.';
@@ -252,7 +347,7 @@ class WaterQualityApp {
     if (violations.length > 0) {
       if (alertBanner && alertText) {
         alertBanner.classList.add('active');
-        alertText.textContent = `ALERT: Critical anomaly detected — ${violations.join(' | ')}`;
+        alertText.textContent = `ALERT [${packet.deviceId}]: Critical anomaly detected — ${violations.join(' | ')}`;
       }
       this.playAlarmChime();
     } else {
@@ -263,7 +358,7 @@ class WaterQualityApp {
   playAlarmChime() {
     if (this.isAudioMuted) return;
     const now = Date.now();
-    if (now - this.lastAlarmTime < 4000) return; // Debounce audio chimes
+    if (now - this.lastAlarmTime < 4000) return;
     this.lastAlarmTime = now;
 
     try {
@@ -278,7 +373,7 @@ class WaterQualityApp {
       const gain = this.audioContext.createGain();
 
       osc.type = 'sine';
-      osc.frequency.setValueAtTime(880, this.audioContext.currentTime); // A5 note
+      osc.frequency.setValueAtTime(880, this.audioContext.currentTime);
       osc.frequency.exponentialRampToValueAtTime(440, this.audioContext.currentTime + 0.3);
 
       gain.gain.setValueAtTime(0.3, this.audioContext.currentTime);
@@ -308,14 +403,16 @@ class WaterQualityApp {
 
   async connectSerial() {
     this.disconnectAll();
-    this.updateConnectionPill('disconnected', 'Connecting USB Serial...');
-    const ok = await this.serial.connect(115200);
+    const baudSelect = document.getElementById('serialBaudSelect');
+    const baudRate = baudSelect ? parseInt(baudSelect.value) : 115200;
+
+    this.updateConnectionPill('disconnected', `Connecting USB Serial @ ${baudRate}...`);
+    const ok = await this.serial.connect(baudRate);
     if (ok) {
       this.activeSource = 'serial';
-      this.updateConnectionPill('connected', 'ESP32 USB Serial (115200 baud)');
+      this.updateConnectionPill('connected', `ESP32 USB Serial (${baudRate} baud)`);
       this.updateModeButtons('btnModeSerial');
     } else {
-      // Revert to simulation
       this.startSimulation();
     }
   }
@@ -326,7 +423,7 @@ class WaterQualityApp {
     const brokerUrl = this.storage.getBrokerUrl();
 
     this.activeSource = 'mqtt';
-    this.updateConnectionPill('disconnected', 'Connecting to Cloud MQTT...');
+    this.updateConnectionPill('disconnected', 'Connecting Cloud MQTT Auto-Discovery...');
     this.mqtt.connect(brokerUrl, stationId);
     this.updateModeButtons('btnModeMqtt');
   }
@@ -390,7 +487,6 @@ class WaterQualityApp {
 
     terminal.insertBefore(line, terminal.firstChild);
 
-    // Limit lines to 100
     while (terminal.children.length > 100) {
       terminal.removeChild(terminal.lastChild);
     }
@@ -406,10 +502,10 @@ class WaterQualityApp {
       return;
     }
 
-    const headers = ['Timestamp', 'Station_ID', 'Source', 'pH', 'Turbidity_NTU', 'TDS_ppm', 'Temp_C', 'DO_mgL', 'WaterLevel_pct', 'WQI', 'WQI_Status'];
+    const headers = ['Timestamp', 'Device_ID', 'Source', 'pH', 'Turbidity_NTU', 'TDS_ppm', 'Temp_C', 'DO_mgL', 'WaterLevel_pct', 'WQI', 'WQI_Status'];
     const rows = this.historyRecords.map(r => [
       `"${r.timestamp}"`,
-      `"${r.stationId}"`,
+      `"${r.deviceId || r.stationId}"`,
       `"${r.source}"`,
       r.ph,
       r.turbidity,
@@ -426,7 +522,7 @@ class WaterQualityApp {
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `water_quality_${this.storage.getStationId()}_${Date.now()}.csv`;
+    link.download = `water_quality_${this.selectedDeviceId}_${Date.now()}.csv`;
     link.click();
     URL.revokeObjectURL(url);
   }
@@ -441,7 +537,7 @@ class WaterQualityApp {
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `water_quality_${this.storage.getStationId()}_${Date.now()}.json`;
+    link.download = `water_quality_${this.selectedDeviceId}_${Date.now()}.json`;
     link.click();
     URL.revokeObjectURL(url);
   }
@@ -450,18 +546,15 @@ class WaterQualityApp {
   // FIRMWARE & SETTINGS MODALS
   // =========================================================================
   initFirmwareGeneratorView() {
-    const stationId = this.storage.getStationId();
-    const stationInput = document.getElementById('fwStationId');
-    if (stationInput) stationInput.value = stationId;
-
     this.updateFirmwareCodePreview();
   }
 
   updateFirmwareCodePreview() {
     const config = {
+      boardType: document.getElementById('fwBoardType')?.value || 'esp32',
       ssid: document.getElementById('fwSsid')?.value || 'YOUR_WIFI_SSID',
       password: document.getElementById('fwPassword')?.value || 'YOUR_WIFI_PASSWORD',
-      stationId: document.getElementById('fwStationId')?.value || this.storage.getStationId(),
+      stationId: document.getElementById('fwStationId')?.value || 'AUTO_MAC',
       mqttBroker: document.getElementById('fwBroker')?.value || 'broker.hivemq.com',
       mqttPort: 1883,
       pinPH: parseInt(document.getElementById('fwPinPH')?.value || '34'),
@@ -482,6 +575,13 @@ class WaterQualityApp {
     document.getElementById('btnModeSim')?.addEventListener('click', () => this.startSimulation());
     document.getElementById('btnModeSerial')?.addEventListener('click', () => this.connectSerial());
     document.getElementById('btnModeMqtt')?.addEventListener('click', () => this.connectMQTT());
+
+    // Device Selector change
+    document.getElementById('deviceSelector')?.addEventListener('change', (e) => {
+      this.selectedDeviceId = e.target.value;
+      const stationElem = document.getElementById('currentStationDisplay');
+      if (stationElem) stationElem.textContent = this.selectedDeviceId === 'auto' ? 'Auto-Detect' : this.selectedDeviceId;
+    });
 
     // Audio alarm toggle
     document.getElementById('btnToggleAudio')?.addEventListener('click', () => {
@@ -536,7 +636,7 @@ class WaterQualityApp {
     this.setupModal('btnOpenSettingsModal', 'settingsModal', 'btnCloseSettingsModal');
 
     // Firmware form inputs live update
-    ['fwSsid', 'fwPassword', 'fwStationId', 'fwBroker', 'fwPinPH', 'fwPinTurb', 'fwPinTDS', 'fwPinTemp'].forEach(id => {
+    ['fwBoardType', 'fwSsid', 'fwPassword', 'fwStationId', 'fwBroker', 'fwPinPH', 'fwPinTurb', 'fwPinTDS', 'fwPinTemp'].forEach(id => {
       document.getElementById(id)?.addEventListener('input', () => this.updateFirmwareCodePreview());
     });
 
@@ -554,8 +654,7 @@ class WaterQualityApp {
     // Download .ino button
     document.getElementById('btnDownloadFirmwareCode')?.addEventListener('click', () => {
       const code = this.updateFirmwareCodePreview();
-      const stationId = document.getElementById('fwStationId')?.value || 'esp32';
-      FirmwareGenerator.downloadSketch(code, `WaterQuality_${stationId}.ino`);
+      FirmwareGenerator.downloadSketch(code, `WaterQuality_ESP32.ino`);
     });
 
     // Settings Modal Preset selector
@@ -694,9 +793,8 @@ class WaterQualityApp {
   }
 }
 
-// Instantiate application upon DOM ready
 window.addEventListener('DOMContentLoaded', () => {
   const app = new WaterQualityApp();
   app.init();
-  window.WaterQualityApp = app; // Expose globally for console testing
+  window.WaterQualityApp = app;
 });

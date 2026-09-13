@@ -1,14 +1,15 @@
 /**
- * ESP32 Firmware Generator
- * Produces customized, fully-commented Arduino C++ sketches for the ESP32
+ * Universal ESP32 Firmware Generator
+ * Produces customized, compile-ready Arduino C++ sketches for ANY ESP32 board
  */
 
 export class FirmwareGenerator {
   static generateCode(config) {
     const {
+      boardType = 'esp32', // 'esp32' | 'esp32s2' | 'esp32s3' | 'esp32c3'
       ssid = 'YOUR_WIFI_SSID',
       password = 'YOUR_WIFI_PASSWORD',
-      stationId = 'esp32-station-01',
+      stationId = 'AUTO_MAC',
       mqttBroker = 'broker.hivemq.com',
       mqttPort = 1883,
       pinPH = 34,
@@ -18,16 +19,15 @@ export class FirmwareGenerator {
       intervalMs = 2000
     } = config;
 
+    const isAutoMac = !stationId || stationId === 'AUTO_MAC' || stationId.trim() === '';
+
     return `/*
  * =========================================================================
- * ESP32 Smart Water Quality Monitoring Node
- * Generates real-time sensor telemetry and streams to Web App via MQTT
- * 
- * Target Board: ESP32 Dev Module / NodeMCU-32S
- * Generated for Station: ${stationId}
+ * UNIVERSAL ESP32 WATER QUALITY MONITORING FIRMWARE
+ * Compatible with ANY ESP32 board
  * =========================================================================
  * 
- * Required Arduino Libraries (Install via Library Manager):
+ * Required Arduino Libraries (Install via Arduino Library Manager):
  *  - PubSubClient by Nick O'Leary
  *  - ArduinoJson by Benoit Blanchon (v6.x or v7.x)
  *  - OneWire by Jim Studt, Paul Stoffregen
@@ -40,35 +40,34 @@ export class FirmwareGenerator {
 #include <OneWire.h>
 #include <DallasTemperature.h>
 
-// ---------- NETWORK CONFIGURATION ----------
+// ---------- WI-FI CONFIGURATION ----------
 const char* WIFI_SSID     = "${ssid}";
 const char* WIFI_PASSWORD = "${password}";
 
+// Cloud MQTT Broker
 const char* MQTT_BROKER   = "${mqttBroker}";
 const int   MQTT_PORT     = ${mqttPort};
-const char* STATION_ID    = "${stationId}";
 
-// Telemetry Topic: Web app subscribes to this exact topic
-const char* TOPIC_TELEMETRY = "water-quality/${stationId}/telemetry";
-const char* TOPIC_CONTROL   = "water-quality/${stationId}/control";
+// Device Identification
+String DEVICE_ID = "${isAutoMac ? "ESP32_AUTO" : stationId}";
+String TOPIC_TELEMETRY = "";
+String TOPIC_CONTROL   = "";
 
-// ---------- SENSOR PIN DEFINITIONS ----------
-const int PIN_PH        = ${pinPH};         // Analog ADC1 (GPIO ${pinPH})
-const int PIN_TURBIDITY = ${pinTurbidity};  // Analog ADC1 (GPIO ${pinTurbidity})
-const int PIN_TDS       = ${pinTDS};        // Analog ADC1 (GPIO ${pinTDS})
-const int PIN_ONE_WIRE  = ${pinTemp};       // Digital GPIO ${pinTemp} for DS18B20
-const int PIN_LED       = 2;                // Built-in status LED
+// ---------- SENSOR PINS ----------
+const int PIN_PH        = ${pinPH};
+const int PIN_TURBIDITY = ${pinTurbidity};
+const int PIN_TDS       = ${pinTDS};
+const int PIN_ONE_WIRE  = ${pinTemp};
+const int PIN_LED       = 2;
 
-// ---------- HARDWARE INSTANCES ----------
 OneWire oneWire(PIN_ONE_WIRE);
 DallasTemperature tempSensor(&oneWire);
 WiFiClient espClient;
 PubSubClient mqttClient(espClient);
 
 unsigned long lastSampleTime = 0;
-const unsigned long SAMPLE_INTERVAL = ${intervalMs}; // Milliseconds
+const unsigned long SAMPLE_INTERVAL = ${intervalMs};
 
-// ---------- MOVING AVERAGE ADC FILTER ----------
 float readSmoothedADC(int pin, int samples = 20) {
   long sum = 0;
   for (int i = 0; i < samples; i++) {
@@ -78,60 +77,59 @@ float readSmoothedADC(int pin, int samples = 20) {
   return (float)sum / samples;
 }
 
-// ---------- SENSOR READING FUNCTIONS ----------
-
-// pH Sensor: Calibrated for standard analog pH meter (4.01 and 6.86 buffers)
 float readPH() {
   float rawADC = readSmoothedADC(PIN_PH);
   float voltage = rawADC * (3.3 / 4095.0);
-  // Calibration slope: adjust 3.5 and 15.0 based on your two-point buffer calibration
-  float phValue = 3.5 * voltage; 
-  if (phValue < 0.0) phValue = 0.0;
-  if (phValue > 14.0) phValue = 14.0;
-  return phValue;
+  float ph = 3.5 * voltage;
+  if (ph < 0.0) ph = 0.0;
+  if (ph > 14.0) ph = 14.0;
+  return ph;
 }
 
-// Turbidity Sensor: NTU calculation from analog voltage
 float readTurbidity() {
   float rawADC = readSmoothedADC(PIN_TURBIDITY);
   float voltage = rawADC * (3.3 / 4095.0);
-  // Typical optical turbidity conversion
   float ntu = -1120.4 * (voltage * voltage) + 5742.3 * voltage - 4352.9;
-  if (ntu < 0) ntu = 0;
-  if (voltage > 2.5) ntu = (2.5 - voltage) * 10.0; // Clean water threshold
+  if (voltage > 2.5) ntu = (2.5 - voltage) * 10.0;
   if (ntu < 0) ntu = 0.5;
   if (ntu > 1000) ntu = 1000;
   return ntu;
 }
 
-// TDS Sensor: Total Dissolved Solids in ppm
-float readTDS(float waterTempC) {
+float readTDS(float tempC) {
   float rawADC = readSmoothedADC(PIN_TDS);
   float voltage = rawADC * (3.3 / 4095.0);
-  // Temperature compensation formula
-  float compensationCoeff = 1.0 + 0.02 * (waterTempC - 25.0);
-  float compensationVoltage = voltage / compensationCoeff;
-  float tdsValue = (133.42 * pow(compensationVoltage, 3) 
-                  - 255.86 * pow(compensationVoltage, 2) 
-                  + 857.39 * compensationVoltage) * 0.5;
-  if (tdsValue < 0) tdsValue = 0;
-  return tdsValue;
+  float compCoeff = 1.0 + 0.02 * (tempC - 25.0);
+  float compVoltage = voltage / compCoeff;
+  float tds = (133.42 * pow(compVoltage, 3) - 255.86 * pow(compVoltage, 2) + 857.39 * compVoltage) * 0.5;
+  if (tds < 0) tds = 0;
+  return tds;
 }
 
-// Temperature Sensor (DS18B20)
 float readWaterTemp() {
   tempSensor.requestTemperatures();
-  float tempC = tempSensor.getTempCByIndex(0);
-  if (tempC == DEVICE_DISCONNECTED_C || tempC < -20.0 || tempC > 80.0) {
-    return 24.5; // Default safe fallback if disconnected
-  }
-  return tempC;
+  float t = tempSensor.getTempCByIndex(0);
+  if (t == DEVICE_DISCONNECTED_C || t < -20.0 || t > 80.0) return 24.5;
+  return t;
 }
 
-// ---------- WI-FI & MQTT CONNECTION HANDLERS ----------
+void initDeviceID() {
+  ${isAutoMac ? `uint8_t mac[6];
+  WiFi.macAddress(mac);
+  char idBuffer[32];
+  snprintf(idBuffer, sizeof(idBuffer), "ESP32_%02X%02X%02X", mac[3], mac[4], mac[5]);
+  DEVICE_ID = String(idBuffer);` : `DEVICE_ID = "${stationId}";`}
+
+  TOPIC_TELEMETRY = "water-quality/" + DEVICE_ID + "/telemetry";
+  TOPIC_CONTROL   = "water-quality/" + DEVICE_ID + "/control";
+}
+
 void setupWiFi() {
-  delay(10);
-  Serial.println();
+  if (String(WIFI_SSID) == "YOUR_WIFI_SSID" || strlen(WIFI_SSID) == 0) {
+    Serial.println("\\n[INFO] Wi-Fi SSID not configured. Streaming over USB Serial directly at 115200 baud.");
+    return;
+  }
+
   Serial.print("Connecting to Wi-Fi: ");
   Serial.println(WIFI_SSID);
 
@@ -139,52 +137,41 @@ void setupWiFi() {
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
 
   int retries = 0;
-  while (WiFi.status() != WL_CONNECTED && retries < 30) {
+  while (WiFi.status() != WL_CONNECTED && retries < 20) {
     delay(500);
     Serial.print(".");
-    digitalWrite(PIN_LED, !digitalRead(PIN_LED));
     retries++;
   }
 
   if (WiFi.status() == WL_CONNECTED) {
-    Serial.println("\\nWiFi Connected! IP Address: ");
+    Serial.println("\\n[OK] Connected! IP: ");
     Serial.println(WiFi.localIP());
-    digitalWrite(PIN_LED, HIGH);
   } else {
-    Serial.println("\\nWiFi Connection Failed! Running in offline/serial mode.");
+    Serial.println("\\n[WARN] Wi-Fi timed out. Continuing in USB Serial mode.");
   }
 }
 
 void mqttCallback(char* topic, byte* payload, unsigned int length) {
-  Serial.print("Message arrived on [");
-  Serial.print(topic);
-  Serial.print("]: ");
-  for (int i = 0; i < length; i++) {
-    Serial.print((char)payload[i]);
-  }
+  Serial.print("Control message: ");
+  for (int i = 0; i < length; i++) Serial.print((char)payload[i]);
   Serial.println();
 }
 
 void reconnectMQTT() {
   if (WiFi.status() != WL_CONNECTED) return;
-
   while (!mqttClient.connected()) {
-    Serial.print("Attempting MQTT connection...");
-    String clientId = "ESP32Client-" + String(random(0xffff), HEX);
-    
+    Serial.print("Connecting to MQTT broker...");
+    String clientId = DEVICE_ID + "-" + String(random(0xffff), HEX);
     if (mqttClient.connect(clientId.c_str())) {
-      Serial.println("connected to MQTT broker!");
-      mqttClient.subscribe(TOPIC_CONTROL);
+      Serial.println(" Connected!");
+      mqttClient.subscribe(TOPIC_CONTROL.c_str());
     } else {
-      Serial.print("failed, rc=");
-      Serial.print(mqttClient.state());
-      Serial.println(" retrying in 5 seconds...");
+      Serial.println(" Retrying in 5s...");
       delay(5000);
     }
   }
 }
 
-// ---------- SETUP ----------
 void setup() {
   Serial.begin(115200);
   pinMode(PIN_LED, OUTPUT);
@@ -192,26 +179,28 @@ void setup() {
   pinMode(PIN_TURBIDITY, INPUT);
   pinMode(PIN_TDS, INPUT);
 
-  analogReadResolution(12); // ESP32 12-bit ADC (0 - 4095)
+  analogReadResolution(12);
   tempSensor.begin();
 
-  setupWiFi();
-  mqttClient.setServer(MQTT_BROKER, MQTT_PORT);
-  mqttClient.setCallback(mqttCallback);
+  initDeviceID();
 
-  Serial.println("==============================================");
-  Serial.println("ESP32 Water Quality Station Active & Ready");
-  Serial.print("Station ID: ");
-  Serial.println(STATION_ID);
-  Serial.println("==============================================");
+  Serial.println("\\n========================================================");
+  Serial.println("   AquaPulse Universal ESP32 Telemetry Node Active     ");
+  Serial.print  ("   Device ID       : "); Serial.println(DEVICE_ID);
+  Serial.print  ("   Telemetry Topic : "); Serial.println(TOPIC_TELEMETRY);
+  Serial.println("========================================================\\n");
+
+  setupWiFi();
+
+  if (WiFi.status() == WL_CONNECTED) {
+    mqttClient.setServer(MQTT_BROKER, MQTT_PORT);
+    mqttClient.setCallback(mqttCallback);
+  }
 }
 
-// ---------- MAIN LOOP ----------
 void loop() {
   if (WiFi.status() == WL_CONNECTED) {
-    if (!mqttClient.connected()) {
-      reconnectMQTT();
-    }
+    if (!mqttClient.connected()) reconnectMQTT();
     mqttClient.loop();
   }
 
@@ -219,36 +208,33 @@ void loop() {
   if (currentMillis - lastSampleTime >= SAMPLE_INTERVAL) {
     lastSampleTime = currentMillis;
 
-    // Read all sensors
-    float tempVal = readWaterTemp();
+    float tempC = readWaterTemp();
     float phVal = readPH();
     float turbVal = readTurbidity();
-    float tdsVal = readTDS(tempVal);
-    // Calculated dissolved oxygen approximation (temperature dependent)
-    float doVal = 14.6 - 0.3 * tempVal;
-    if (doVal < 0) doVal = 0;
+    float tdsVal = readTDS(tempC);
+    float doVal = max(0.0f, 14.6f - 0.3f * tempC);
     int rssi = WiFi.status() == WL_CONNECTED ? WiFi.RSSI() : 0;
 
-    // 1. Send JSON packet to Serial (USB Web Serial Monitor)
     StaticJsonDocument<256> doc;
-    doc["stationId"] = STATION_ID;
+    doc["deviceId"] = DEVICE_ID;
+    doc["stationId"] = DEVICE_ID;
     doc["ph"] = serialized(String(phVal, 2));
     doc["turbidity"] = serialized(String(turbVal, 2));
     doc["tds"] = round(tdsVal);
-    doc["temp"] = serialized(String(tempVal, 1));
+    doc["temp"] = serialized(String(tempC, 1));
     doc["dissolvedOxygen"] = serialized(String(doVal, 2));
-    doc["waterLevel"] = 85;
+    doc["waterLevel"] = 82;
     doc["rssi"] = rssi;
 
-    char jsonBuffer[256];
-    serializeJson(doc, jsonBuffer);
-    
-    // Output over USB Serial
-    Serial.println(jsonBuffer);
+    char buffer[256];
+    serializeJson(doc, buffer);
+
+    // 1. Output over USB Serial
+    Serial.println(buffer);
 
     // 2. Publish to Cloud MQTT
-    if (mqttClient.connected()) {
-      mqttClient.publish(TOPIC_TELEMETRY, jsonBuffer);
+    if (WiFi.status() == WL_CONNECTED && mqttClient.connected()) {
+      mqttClient.publish(TOPIC_TELEMETRY.c_str(), buffer);
     }
   }
 }

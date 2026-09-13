@@ -1,21 +1,26 @@
 /**
- * Cloud MQTT WebSocket Client
+ * Cloud MQTT WebSocket Client with Auto-Discovery
  * Real-time cloud communication using MQTT over Secure WebSockets (WSS)
+ * Subscribes to wildcard topics to discover and receive data from ANY ESP32.
  */
 
+import { PayloadAdapter } from './payload-adapter.js';
+
 export class MqttClient {
-  constructor(onDataCallback, onStatusChangeCallback, onRawLogCallback) {
+  constructor(onDataCallback, onStatusChangeCallback, onRawLogCallback, onDeviceDiscoveredCallback) {
     this.onDataCallback = onDataCallback;
     this.onStatusChangeCallback = onStatusChangeCallback;
     this.onRawLogCallback = onRawLogCallback;
+    this.onDeviceDiscoveredCallback = onDeviceDiscoveredCallback;
     this.client = null;
     this.isConnected = false;
     this.stationId = '';
     this.brokerUrl = '';
     this.packetCount = 0;
+    this.discoveredDevices = new Map();
   }
 
-  connect(brokerUrl, stationId) {
+  connect(brokerUrl, stationId = '') {
     if (this.client) {
       try {
         this.client.end(true);
@@ -52,15 +57,25 @@ export class MqttClient {
 
       this.client.on('connect', () => {
         this.isConnected = true;
-        const telemetryTopic = `water-quality/${this.stationId}/telemetry`;
 
-        this.client.subscribe(telemetryTopic, (err) => {
+        // Subscribe to Wildcard Topics to automatically discover ANY ESP32
+        const topics = [
+          'water-quality/+/telemetry',
+          'water-quality/+/data',
+          'water-quality/#'
+        ];
+
+        if (this.stationId) {
+          topics.push(`water-quality/${this.stationId}/telemetry`);
+        }
+
+        this.client.subscribe(topics, (err) => {
           if (!err) {
             if (this.onStatusChangeCallback) {
-              this.onStatusChangeCallback(true, `Connected to Cloud MQTT (Station: ${this.stationId})`);
+              this.onStatusChangeCallback(true, `Connected to Cloud Broker (Auto-Discovery Active)`);
             }
             if (this.onRawLogCallback) {
-              this.onRawLogCallback('SYSTEM', `Subscribed to topic: ${telemetryTopic}`);
+              this.onRawLogCallback('SYSTEM', `Listening on wildcard topics: ${topics.join(', ')}`);
             }
           } else {
             console.error('Subscription error', err);
@@ -73,14 +88,26 @@ export class MqttClient {
         const msgStr = message.toString();
 
         if (this.onRawLogCallback) {
-          this.onRawLogCallback('MQTT', msgStr);
+          this.onRawLogCallback('MQTT', `[${topic}] ${msgStr}`);
         }
 
-        try {
-          const parsed = JSON.parse(msgStr);
-          this.emitParsed(parsed);
-        } catch (e) {
-          console.warn('Non-JSON MQTT packet received:', msgStr);
+        // Extract potential device ID from MQTT topic (e.g. water-quality/<DEVICE_ID>/telemetry)
+        const parts = topic.split('/');
+        let topicDeviceId = '';
+        if (parts.length >= 2 && parts[0] === 'water-quality') {
+          topicDeviceId = parts[1];
+        }
+
+        // Normalize using universal adapter
+        const packet = PayloadAdapter.normalize(msgStr, 'cloud-mqtt', topicDeviceId);
+        if (!packet) return;
+
+        // Register device in discovered list
+        this.registerDevice(packet.deviceId, packet.rssi);
+
+        // Emit normalized telemetry packet
+        if (this.onDataCallback) {
+          this.onDataCallback(packet);
         }
       });
 
@@ -110,27 +137,25 @@ export class MqttClient {
     }
   }
 
-  emitParsed(data) {
-    const packet = {
-      ph: data.ph !== undefined ? Number(data.ph) : 7.0,
-      turbidity: data.turbidity !== undefined ? Number(data.turbidity) : 1.0,
-      tds: data.tds !== undefined ? Number(data.tds) : 200,
-      temp: data.temp !== undefined ? Number(data.temp) : 24.0,
-      dissolvedOxygen: data.dissolvedOxygen !== undefined ? Number(data.dissolvedOxygen) : 7.5,
-      waterLevel: data.waterLevel !== undefined ? Number(data.waterLevel) : 80,
-      rssi: data.rssi || -60,
-      source: 'cloud-mqtt',
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+  registerDevice(deviceId, rssi) {
+    const isNew = !this.discoveredDevices.has(deviceId);
+    const info = {
+      id: deviceId,
+      lastSeen: Date.now(),
+      rssi: rssi || -60,
+      packetCount: (this.discoveredDevices.get(deviceId)?.packetCount || 0) + 1
     };
 
-    if (this.onDataCallback) {
-      this.onDataCallback(packet);
+    this.discoveredDevices.set(deviceId, info);
+
+    if (this.onDeviceDiscoveredCallback) {
+      this.onDeviceDiscoveredCallback(info, isNew, Array.from(this.discoveredDevices.values()));
     }
   }
 
-  publishControl(command, payload = {}) {
+  publishControl(targetDeviceId, command, payload = {}) {
     if (!this.client || !this.isConnected) return false;
-    const topic = `water-quality/${this.stationId}/control`;
+    const topic = `water-quality/${targetDeviceId}/control`;
     const message = JSON.stringify({ command, ...payload, timestamp: Date.now() });
     this.client.publish(topic, message);
     return true;

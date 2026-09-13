@@ -1,0 +1,849 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#060b14">
+  <meta name="description" content="Real-time ESP32 IoT Water Quality Monitoring Dashboard with Live Cloud MQTT, Web Serial USB connection, Water Quality Index (WQI) scoring, and automated firmware generator.">
+  <meta name="keywords" content="ESP32, Water Quality Monitoring, IoT, MQTT, Web Serial, pH, Turbidity, TDS, Arduino">
+  <title>AquaPulse IoT — ESP32 Water Quality Monitoring</title>
+
+  <!-- Google Fonts: Outfit (Display), Inter (Body), JetBrains Mono (Code/Telemetry) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
+  <!-- Chart.js & MQTT.js via CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script src="https://unpkg.com/mqtt@5.3.4/dist/mqtt.min.js"></script>
+
+  <!-- Custom Aquatic Glassmorphism Stylesheet -->
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+  <div class="app-wrapper">
+
+    <!-- =========================================================================
+         TOP APP BAR & HEADER
+         ========================================================================= -->
+    <header class="header-bar" role="banner">
+      <div class="brand-section">
+        <div class="brand-icon-wrapper" aria-hidden="true">
+          <!-- Water Droplet IoT SVG Icon -->
+          <svg viewBox="0 0 24 24">
+            <path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"></path>
+          </svg>
+        </div>
+        <div class="brand-text">
+          <h1>AquaPulse IoT <span class="brand-badge">ESP32 Live</span></h1>
+          <p>Autonomous Water Quality & Hydrological Telemetry System</p>
+        </div>
+      </div>
+
+      <div class="header-actions">
+        <!-- Live Connection Status Pill -->
+        <div id="connectionPill" class="connection-pill simulated" aria-live="polite">
+          <span class="status-dot"></span>
+          <span id="connectionStatusText">Simulated Live Stream</span>
+        </div>
+
+        <!-- Connection Mode Switchers -->
+        <button id="btnModeSim" class="btn btn-primary" title="Toggle Simulation Mode">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polygon points="5 3 19 12 5 21 5 3"></polygon>
+          </svg>
+          Simulation
+        </button>
+
+        <button id="btnModeSerial" class="btn btn-secondary" title="Connect ESP32 via USB Serial">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="2" y="2" width="20" height="8" rx="2" ry="2"></rect>
+            <rect x="2" y="14" width="20" height="8" rx="2" ry="2"></rect>
+            <line x1="6" y1="6" x2="6.01" y2="6"></line>
+            <line x1="6" y1="18" x2="6.01" y2="18"></line>
+          </svg>
+          USB Serial
+        </button>
+
+        <button id="btnModeMqtt" class="btn btn-secondary" title="Connect to Cloud MQTT Broker">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"></path>
+          </svg>
+          Cloud MQTT
+        </button>
+
+        <!-- Alarm Audio Chime Toggle -->
+        <button id="btnToggleAudio" class="btn btn-amber" title="Toggle audio chime on hazard threshold alerts">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+            <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+          </svg>
+          Audio On
+        </button>
+
+        <!-- Firmware & Wiring Hub Modal Trigger -->
+        <button id="btnOpenFirmwareModal" class="btn btn-cyan-outline" title="Generate customized ESP32 Arduino sketch and view wiring pinouts">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="16 18 22 12 16 6"></polyline>
+            <polyline points="8 6 2 12 8 18"></polyline>
+          </svg>
+          ESP32 Firmware
+        </button>
+
+        <!-- Thresholds & Presets Settings Modal Trigger -->
+        <button id="btnOpenSettingsModal" class="btn btn-secondary btn-icon-only" title="Configure threshold presets and station ID" aria-label="Settings">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="3"></circle>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <!-- =========================================================================
+         ALERT BANNER (ACTIVE ON THRESHOLD VIOLATION)
+         ========================================================================= -->
+    <div id="alertBanner" class="alert-banner" role="alert">
+      <div class="alert-content">
+        <div class="alert-icon">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+            <line x1="12" y1="9" x2="12" y2="13"></line>
+            <line x1="12" y1="17" x2="12.01" y2="17"></line>
+          </svg>
+        </div>
+        <span id="alertBannerText">Hazard Alert: Sensor parameter deviation detected!</span>
+      </div>
+      <button class="btn btn-danger" onclick="document.getElementById('alertBanner').classList.remove('active')">
+        Acknowledge
+      </button>
+    </div>
+
+    <!-- =========================================================================
+         HERO SECTION: WATER QUALITY INDEX (WQI) & STATION STATUS
+         ========================================================================= -->
+    <section class="hero-grid" aria-label="System Summary">
+      <!-- Water Quality Index Card -->
+      <div class="glass-card wqi-card">
+        <div class="wqi-info">
+          <div class="card-label">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
+            </svg>
+            Aggregate Health Rating
+          </div>
+          <h2 class="wqi-title">Water Quality Index (WQI)</h2>
+          <div>
+            <span id="wqiStatusBadge" class="wqi-status-badge excellent">EXCELLENT</span>
+          </div>
+          <p id="wqiDescription" class="wqi-description">
+            Water quality is pristine. All physiological, chemical, and mineral parameters are within optimal safety bounds.
+          </p>
+
+          <!-- Simulation Anomaly Test Buttons -->
+          <div style="margin-top: 1rem; display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
+            <span style="font-size: 0.72rem; font-family: var(--font-mono); color: var(--text-tertiary);">Test Anomalies:</span>
+            <button id="btnTestAcid" class="btn btn-secondary" style="padding: 0.25rem 0.6rem; font-size: 0.75rem;" title="Simulate acid contamination spike">
+              🧪 Acid Spill
+            </button>
+            <button id="btnTestTurbid" class="btn btn-secondary" style="padding: 0.25rem 0.6rem; font-size: 0.75rem;" title="Simulate muddy sediment turbidity runoff">
+              🌊 Muddy Runoff
+            </button>
+            <button id="btnTestSaline" class="btn btn-secondary" style="padding: 0.25rem 0.6rem; font-size: 0.75rem;" title="Simulate heavy dissolved solids spike">
+              🧂 TDS Surge
+            </button>
+          </div>
+        </div>
+
+        <!-- Animated Circular WQI Gauge -->
+        <div class="wqi-dial-wrapper">
+          <svg class="wqi-dial-svg" viewBox="0 0 160 160">
+            <circle class="wqi-dial-bg" cx="80" cy="80" r="65"></circle>
+            <circle id="wqiCircleProgress" class="wqi-dial-progress" cx="80" cy="80" r="65"></circle>
+          </svg>
+          <div class="wqi-dial-center">
+            <div id="wqiNumber" class="wqi-number">94</div>
+            <div class="wqi-label-sub">Score / 100</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Station Overview Card -->
+      <div class="glass-card station-summary-card">
+        <div>
+          <div class="card-label">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="10"></circle>
+              <line x1="2" y1="12" x2="22" y2="12"></line>
+              <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
+            </svg>
+            Station Telemetry Node
+          </div>
+          <div class="station-meta-grid">
+            <div class="meta-item">
+              <div class="meta-label">Station ID</div>
+              <div id="currentStationDisplay" class="meta-val mono">esp32-wqm-01</div>
+            </div>
+            <div class="meta-item">
+              <div class="meta-label">Active Broker</div>
+              <div id="currentBrokerDisplay" class="meta-val mono">broker.hivemq.com</div>
+            </div>
+            <div class="meta-item">
+              <div class="meta-label">Telemetry Source</div>
+              <div id="metaSource" class="meta-val" style="font-size: 0.85rem;">Simulated</div>
+            </div>
+            <div class="meta-item">
+              <div class="meta-label">Wi-Fi Signal / RSSI</div>
+              <div id="metaRssi" class="meta-val mono">-58 dBm</div>
+            </div>
+            <div class="meta-item" style="grid-column: span 2;">
+              <div class="meta-label">Last Transmission Timestamp</div>
+              <div id="metaLastPacket" class="meta-val mono" style="color: var(--text-primary); font-size: 0.85rem;">Awaiting telemetry...</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="station-actions">
+          <span style="font-size: 0.75rem; font-family: var(--font-mono); color: var(--text-tertiary); margin-right: auto;">Export Logs:</span>
+          <button id="btnExportCSV" class="btn btn-secondary" title="Download historical telemetry as CSV spreadsheet">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+              <polyline points="7 10 12 15 17 10"></polyline>
+              <line x1="12" y1="15" x2="12" y2="3"></line>
+            </svg>
+            CSV Data
+          </button>
+          <button id="btnExportJSON" class="btn btn-secondary" title="Download telemetry as JSON file">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="16 18 22 12 16 6"></polyline>
+              <polyline points="8 6 2 12 8 18"></polyline>
+            </svg>
+            JSON
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- =========================================================================
+         SENSOR METRICS CARDS (6 PARALLEL PARAMETERS)
+         ========================================================================= -->
+    <div class="section-header">
+      <h2 class="section-title">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="18" y1="20" x2="18" y2="10"></line>
+          <line x1="12" y1="20" x2="12" y2="4"></line>
+          <line x1="6" y1="20" x2="6" y2="14"></line>
+        </svg>
+        Live Hydrochemical Sensors
+      </h2>
+    </div>
+
+    <section class="sensors-grid" aria-label="Sensor Readings">
+
+      <!-- 1. pH Level Sensor Card -->
+      <div class="glass-card sensor-card">
+        <div>
+          <div class="sensor-card-header">
+            <div class="sensor-title-group">
+              <div class="sensor-icon-box">
+                <!-- Chemistry Tube SVG -->
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M10 2v7.31M14 2v7.31M8.5 2h7M14 9.3a6.5 6.5 0 1 1-4 0"></path>
+                </svg>
+              </div>
+              <div>
+                <h3 class="sensor-name">Acidity & Alkalinity</h3>
+                <span class="sensor-sub">pH Sensor (Analog)</span>
+              </div>
+            </div>
+            <span id="badge-ph" class="sensor-badge safe">SAFE</span>
+          </div>
+
+          <div class="sensor-value-row">
+            <div>
+              <span id="val-ph" class="sensor-value">7.35</span>
+              <span class="sensor-unit">pH</span>
+            </div>
+            <canvas id="sparkline-ph" class="mini-sparkline" width="80" height="28"></canvas>
+          </div>
+
+          <div class="range-bar-container">
+            <div class="range-bar-track">
+              <div id="bar-ph" class="range-bar-fill" style="width: 52%;"></div>
+            </div>
+            <div class="range-labels">
+              <span>0 (Acidic)</span>
+              <span>7 (Neutral)</span>
+              <span>14 (Alkaline)</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="sensor-footer">
+          <div class="ideal-range">Ideal: <span>6.5 – 8.5 pH</span></div>
+          <span style="font-family: var(--font-mono); color: var(--accent-cyan);">GPIO 34</span>
+        </div>
+      </div>
+
+      <!-- 2. Turbidity Sensor Card -->
+      <div class="glass-card sensor-card">
+        <div>
+          <div class="sensor-card-header">
+            <div class="sensor-title-group">
+              <div class="sensor-icon-box">
+                <!-- Water Wave SVG -->
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M2 12s3-4 6-4 6 4 8 4 6-4 6-4M2 18s3-4 6-4 6 4 8 4 6-4 6-4"></path>
+                </svg>
+              </div>
+              <div>
+                <h3 class="sensor-name">Turbidity / Clarity</h3>
+                <span class="sensor-sub">Optical Sensor</span>
+              </div>
+            </div>
+            <span id="badge-turbidity" class="sensor-badge safe">SAFE</span>
+          </div>
+
+          <div class="sensor-value-row">
+            <div>
+              <span id="val-turbidity" class="sensor-value">1.8</span>
+              <span class="sensor-unit">NTU</span>
+            </div>
+            <canvas id="sparkline-turbidity" class="mini-sparkline" width="80" height="28"></canvas>
+          </div>
+
+          <div class="range-bar-container">
+            <div class="range-bar-track">
+              <div id="bar-turbidity" class="range-bar-fill" style="width: 25%;"></div>
+            </div>
+            <div class="range-labels">
+              <span>0 (Clear)</span>
+              <span>5 (WHO Max)</span>
+              <span>50+ (Muddy)</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="sensor-footer">
+          <div class="ideal-range">Ideal: <span>&lt; 5.0 NTU</span></div>
+          <span style="font-family: var(--font-mono); color: var(--accent-cyan);">GPIO 35</span>
+        </div>
+      </div>
+
+      <!-- 3. TDS (Total Dissolved Solids) Card -->
+      <div class="glass-card sensor-card">
+        <div>
+          <div class="sensor-card-header">
+            <div class="sensor-title-group">
+              <div class="sensor-icon-box">
+                <!-- Crystal / Hexagon SVG -->
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <polygon points="12 2 2 7 2 17 12 22 22 17 22 7 12 2"></polygon>
+                  <line x1="2" y1="7" x2="12" y2="12"></line>
+                  <line x1="12" y1="22" x2="12" y2="12"></line>
+                  <line x1="22" y1="7" x2="12" y2="12"></line>
+                </svg>
+              </div>
+              <div>
+                <h3 class="sensor-name">Total Dissolved Solids</h3>
+                <span class="sensor-sub">Conductivity (TDS)</span>
+              </div>
+            </div>
+            <span id="badge-tds" class="sensor-badge safe">SAFE</span>
+          </div>
+
+          <div class="sensor-value-row">
+            <div>
+              <span id="val-tds" class="sensor-value">215</span>
+              <span class="sensor-unit">ppm</span>
+            </div>
+            <canvas id="sparkline-tds" class="mini-sparkline" width="80" height="28"></canvas>
+          </div>
+
+          <div class="range-bar-container">
+            <div class="range-bar-track">
+              <div id="bar-tds" class="range-bar-fill" style="width: 38%;"></div>
+            </div>
+            <div class="range-labels">
+              <span>50 (Pristine)</span>
+              <span>300 (Good)</span>
+              <span>1000 (Hard)</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="sensor-footer">
+          <div class="ideal-range">Ideal: <span>50 – 300 ppm</span></div>
+          <span style="font-family: var(--font-mono); color: var(--accent-cyan);">GPIO 32</span>
+        </div>
+      </div>
+
+      <!-- 4. Water Temperature Card -->
+      <div class="glass-card sensor-card">
+        <div>
+          <div class="sensor-card-header">
+            <div class="sensor-title-group">
+              <div class="sensor-icon-box">
+                <!-- Thermometer SVG -->
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M14 14.76V3.5a2.5 2.5 0 0 0-5 0v11.26a4.5 4.5 0 1 0 5 0z"></path>
+                </svg>
+              </div>
+              <div>
+                <h3 class="sensor-name">Water Temperature</h3>
+                <span class="sensor-sub">DS18B20 Digital Probe</span>
+              </div>
+            </div>
+            <span id="badge-temp" class="sensor-badge safe">SAFE</span>
+          </div>
+
+          <div class="sensor-value-row">
+            <div>
+              <span id="val-temp" class="sensor-value">23.6</span>
+              <span class="sensor-unit">°C</span>
+            </div>
+            <canvas id="sparkline-temp" class="mini-sparkline" width="80" height="28"></canvas>
+          </div>
+
+          <div class="range-bar-container">
+            <div class="range-bar-track">
+              <div id="bar-temp" class="range-bar-fill" style="width: 48%;"></div>
+            </div>
+            <div class="range-labels">
+              <span>10°C (Cold)</span>
+              <span>24°C (Optimal)</span>
+              <span>40°C (Warm)</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="sensor-footer">
+          <div class="ideal-range">Ideal: <span>18 – 26 °C</span></div>
+          <span style="font-family: var(--font-mono); color: var(--accent-cyan);">GPIO 4 (1-Wire)</span>
+        </div>
+      </div>
+
+      <!-- 5. Dissolved Oxygen (DO) Card -->
+      <div class="glass-card sensor-card">
+        <div>
+          <div class="sensor-card-header">
+            <div class="sensor-title-group">
+              <div class="sensor-icon-box">
+                <!-- Oxygen Molecule SVG -->
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <circle cx="12" cy="12" r="8"></circle>
+                  <line x1="12" y1="8" x2="12" y2="16"></line>
+                  <line x1="8" y1="12" x2="16" y2="12"></line>
+                </svg>
+              </div>
+              <div>
+                <h3 class="sensor-name">Dissolved Oxygen</h3>
+                <span class="sensor-sub">Electrochemical Probe</span>
+              </div>
+            </div>
+            <span id="badge-dissolvedOxygen" class="sensor-badge safe">SAFE</span>
+          </div>
+
+          <div class="sensor-value-row">
+            <div>
+              <span id="val-dissolvedOxygen" class="sensor-value">7.8</span>
+              <span class="sensor-unit">mg/L</span>
+            </div>
+          </div>
+
+          <div class="range-bar-container">
+            <div class="range-bar-track">
+              <div id="bar-dissolvedOxygen" class="range-bar-fill" style="width: 78%;"></div>
+            </div>
+            <div class="range-labels">
+              <span>0 (Anoxic)</span>
+              <span>6.5 (Safe)</span>
+              <span>14 (Saturated)</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="sensor-footer">
+          <div class="ideal-range">Ideal: <span>&gt; 6.5 mg/L</span></div>
+          <span style="font-family: var(--font-mono); color: var(--accent-cyan);">Calculated / DO</span>
+        </div>
+      </div>
+
+      <!-- 6. Water Reservoir Level Card -->
+      <div class="glass-card sensor-card">
+        <div>
+          <div class="sensor-card-header">
+            <div class="sensor-title-group">
+              <div class="sensor-icon-box">
+                <!-- Gauge / Tank SVG -->
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path>
+                </svg>
+              </div>
+              <div>
+                <h3 class="sensor-name">Reservoir Capacity</h3>
+                <span class="sensor-sub">Ultrasonic / Depth</span>
+              </div>
+            </div>
+            <span id="badge-waterLevel" class="sensor-badge safe">SAFE</span>
+          </div>
+
+          <div class="sensor-value-row">
+            <div>
+              <span id="val-waterLevel" class="sensor-value">82</span>
+              <span class="sensor-unit">%</span>
+            </div>
+          </div>
+
+          <div class="range-bar-container">
+            <div class="range-bar-track">
+              <div id="bar-waterLevel" class="range-bar-fill" style="width: 82%;"></div>
+            </div>
+            <div class="range-labels">
+              <span>0% (Empty)</span>
+              <span>50% (Normal)</span>
+              <span>100% (Full)</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="sensor-footer">
+          <div class="ideal-range">Safe: <span>30% – 95%</span></div>
+          <span style="font-family: var(--font-mono); color: var(--accent-cyan);">GPIO 16 / Level</span>
+        </div>
+      </div>
+
+    </section>
+
+    <!-- =========================================================================
+         LIVE HISTORICAL TREND CHARTS
+         ========================================================================= -->
+    <section class="glass-card chart-card" aria-label="Real-time Analytics">
+      <div class="chart-header">
+        <div class="chart-title-group">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
+          </svg>
+          <h2 class="section-title" style="margin: 0;">Live Dynamic Hydro-Telemetry Trends</h2>
+        </div>
+
+        <div class="chart-controls">
+          <!-- Parameter Toggle Filters -->
+          <div class="dataset-pill-group">
+            <button class="dataset-btn active" data-key="all">All Sensors</button>
+            <button class="dataset-btn" data-key="ph">pH</button>
+            <button class="dataset-btn" data-key="turbidity">Turbidity</button>
+            <button class="dataset-btn" data-key="tds">TDS</button>
+            <button class="dataset-btn" data-key="temp">Temp</button>
+          </div>
+
+          <!-- Time Window Filters -->
+          <div class="timeframe-pill-group">
+            <button class="timeframe-btn active" data-count="30">30 Pts</button>
+            <button class="timeframe-btn" data-count="60">60 Pts</button>
+            <button class="timeframe-btn" data-count="120">120 Pts</button>
+            <button class="timeframe-btn" data-count="300">All</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="chart-canvas-container">
+        <canvas id="telemetryChart"></canvas>
+      </div>
+    </section>
+
+    <!-- =========================================================================
+         LIVE TELEMETRY RAW PACKET TERMINAL
+         ========================================================================= -->
+    <section class="glass-card terminal-card" aria-label="Incoming Raw Packets">
+      <div class="terminal-header">
+        <div style="display: flex; align-items: center; gap: 0.6rem;">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="4 17 10 11 4 5"></polyline>
+            <line x1="12" y1="19" x2="20" y2="19"></line>
+          </svg>
+          <h3 style="font-size: 1rem; font-weight: 600; color: #ffffff;">Live Telemetry Stream & JSON Packet Inspector</h3>
+        </div>
+
+        <div style="display: flex; align-items: center; gap: 0.5rem;">
+          <button id="btnClearTerminal" class="btn btn-secondary" style="padding: 0.35rem 0.75rem; font-size: 0.75rem;">
+            Clear Log
+          </button>
+        </div>
+      </div>
+
+      <div id="terminalBody" class="terminal-body" role="log" aria-live="polite">
+        <!-- Live log items will be inserted dynamically here -->
+      </div>
+    </section>
+
+    <!-- =========================================================================
+         FOOTER
+         ========================================================================= -->
+    <footer class="footer-bar" role="contentinfo">
+      <div>
+        <span>AquaPulse IoT © 2026 — Designed for Environmental & Water Quality Assurance</span>
+      </div>
+      <div class="footer-links">
+        <a href="https://github.com/baidiksatyachatterjee-lgtm/Water-Quality-Monitoring" target="_blank" rel="noopener noreferrer">
+          GitHub Repository
+        </a>
+        <span>•</span>
+        <a href="#btnOpenFirmwareModal" onclick="document.getElementById('btnOpenFirmwareModal').click(); return false;">
+          ESP32 Setup Guide
+        </a>
+      </div>
+    </footer>
+
+  </div> <!-- End .app-wrapper -->
+
+  <!-- =========================================================================
+       MODAL 1: ESP32 FIRMWARE GENERATOR & WIRING GUIDE
+       ========================================================================= -->
+  <div id="firmwareModal" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="firmwareModalTitle">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3 id="firmwareModalTitle" class="modal-title">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="4" y="4" width="16" height="16" rx="2" ry="2"></rect>
+            <rect x="9" y="9" width="6" height="6"></rect>
+            <line x1="9" y1="1" x2="9" y2="4"></line>
+            <line x1="15" y1="1" x2="15" y2="4"></line>
+            <line x1="9" y1="20" x2="9" y2="23"></line>
+            <line x1="15" y1="20" x2="15" y2="23"></line>
+            <line x1="20" y1="9" x2="23" y2="9"></line>
+            <line x1="20" y1="14" x2="23" y2="14"></line>
+            <line x1="1" y1="9" x2="4" y2="9"></line>
+            <line x1="1" y1="14" x2="4" y2="14"></line>
+          </svg>
+          ESP32 Firmware Generator & Wiring Guide
+        </h3>
+        <button id="btnCloseFirmwareModal" class="modal-close-btn" aria-label="Close modal">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+      </div>
+
+      <div class="modal-body">
+        <p style="font-size: 0.85rem; color: var(--text-secondary);">
+          Customize your Wi-Fi credentials, Station ID, and pinout assignments. The C++ sketch automatically updates and compiles with zero modifications required in the Arduino IDE!
+        </p>
+
+        <!-- Dynamic Firmware Configuration Form -->
+        <div class="form-grid-2">
+          <div class="form-group">
+            <label class="form-label" for="fwSsid">Wi-Fi Network Name (SSID)</label>
+            <input type="text" id="fwSsid" class="form-input" value="YOUR_WIFI_SSID" placeholder="Home or Lab Wi-Fi">
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="fwPassword">Wi-Fi Password</label>
+            <input type="text" id="fwPassword" class="form-input" value="YOUR_WIFI_PASSWORD" placeholder="Wi-Fi Password">
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="fwStationId">Station Identifier (Must match Web App)</label>
+            <input type="text" id="fwStationId" class="form-input" value="esp32-station-01">
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="fwBroker">MQTT Broker Host</label>
+            <input type="text" id="fwBroker" class="form-input" value="broker.hivemq.com">
+          </div>
+        </div>
+
+        <div class="form-grid-2">
+          <div class="form-group">
+            <label class="form-label" for="fwPinPH">Analog pH Pin (ADC1)</label>
+            <select id="fwPinPH" class="form-select">
+              <option value="34" selected>GPIO 34 (ADC1_CH6)</option>
+              <option value="35">GPIO 35 (ADC1_CH7)</option>
+              <option value="32">GPIO 32 (ADC1_CH4)</option>
+              <option value="33">GPIO 33 (ADC1_CH5)</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="fwPinTurb">Analog Turbidity Pin (ADC1)</label>
+            <select id="fwPinTurb" class="form-select">
+              <option value="35" selected>GPIO 35 (ADC1_CH7)</option>
+              <option value="34">GPIO 34 (ADC1_CH6)</option>
+              <option value="32">GPIO 32 (ADC1_CH4)</option>
+              <option value="33">GPIO 33 (ADC1_CH5)</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="fwPinTDS">Analog TDS Pin (ADC1)</label>
+            <select id="fwPinTDS" class="form-select">
+              <option value="32" selected>GPIO 32 (ADC1_CH4)</option>
+              <option value="33">GPIO 33 (ADC1_CH5)</option>
+              <option value="34">GPIO 34 (ADC1_CH6)</option>
+              <option value="35">GPIO 35 (ADC1_CH7)</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="fwPinTemp">DS18B20 Temp Probe (Digital 1-Wire)</label>
+            <select id="fwPinTemp" class="form-select">
+              <option value="4" selected>GPIO 4</option>
+              <option value="5">GPIO 5</option>
+              <option value="18">GPIO 18</option>
+              <option value="19">GPIO 19</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Generated Code Preview -->
+        <div class="code-preview-box">
+          <div class="code-actions-floating">
+            <button id="btnCopyFirmwareCode" class="btn btn-secondary" style="padding: 0.35rem 0.75rem; font-size: 0.75rem;">
+              Copy Sketch
+            </button>
+            <button id="btnDownloadFirmwareCode" class="btn btn-primary" style="padding: 0.35rem 0.75rem; font-size: 0.75rem;">
+              Download .ino
+            </button>
+          </div>
+          <pre><code id="generatedFirmwareCode">Generating sketch...</code></pre>
+        </div>
+
+        <!-- Wiring Diagram Table -->
+        <div style="background: rgba(255,255,255,0.02); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: 1rem;">
+          <h4 style="font-size: 0.95rem; margin-bottom: 0.75rem; color: #ffffff;">ESP32 Hardware Pinout Connections</h4>
+          <table style="width: 100%; font-size: 0.82rem; border-collapse: collapse; font-family: var(--font-mono);">
+            <thead>
+              <tr style="border-bottom: 1px solid var(--border-subtle); text-align: left; color: var(--accent-cyan);">
+                <th style="padding: 0.4rem;">Sensor</th>
+                <th style="padding: 0.4rem;">Signal Pin</th>
+                <th style="padding: 0.4rem;">VCC</th>
+                <th style="padding: 0.4rem;">GND</th>
+                <th style="padding: 0.4rem;">Notes</th>
+              </tr>
+            </thead>
+            <tbody style="color: var(--text-secondary);">
+              <tr style="border-bottom: 1px solid rgba(255,255,255,0.04);">
+                <td style="padding: 0.4rem; color: #ffffff;">pH Sensor Board</td>
+                <td style="padding: 0.4rem; color: var(--accent-cyan);">GPIO 34 (A0/Po)</td>
+                <td style="padding: 0.4rem;">5V / VIN</td>
+                <td style="padding: 0.4rem;">GND</td>
+                <td style="padding: 0.4rem;">Calibrate with buffer 4.0 & 7.0</td>
+              </tr>
+              <tr style="border-bottom: 1px solid rgba(255,255,255,0.04);">
+                <td style="padding: 0.4rem; color: #ffffff;">Turbidity Sensor</td>
+                <td style="padding: 0.4rem; color: var(--accent-cyan);">GPIO 35 (Analog)</td>
+                <td style="padding: 0.4rem;">5V / VIN</td>
+                <td style="padding: 0.4rem;">GND</td>
+                <td style="padding: 0.4rem;">Flip switch to 'A' (Analog)</td>
+              </tr>
+              <tr style="border-bottom: 1px solid rgba(255,255,255,0.04);">
+                <td style="padding: 0.4rem; color: #ffffff;">TDS Sensor Meter</td>
+                <td style="padding: 0.4rem; color: var(--accent-cyan);">GPIO 32 (Analog)</td>
+                <td style="padding: 0.4rem;">3.3V or 5V</td>
+                <td style="padding: 0.4rem;">GND</td>
+                <td style="padding: 0.4rem;">Submerge probe tip only</td>
+              </tr>
+              <tr>
+                <td style="padding: 0.4rem; color: #ffffff;">DS18B20 Temp Probe</td>
+                <td style="padding: 0.4rem; color: var(--accent-cyan);">GPIO 4 (Yellow)</td>
+                <td style="padding: 0.4rem;">3.3V (Red)</td>
+                <td style="padding: 0.4rem;">GND (Black)</td>
+                <td style="padding: 0.4rem;">4.7kΩ pullup between VCC & Signal</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="document.getElementById('firmwareModal').classList.remove('active')">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- =========================================================================
+       MODAL 2: THRESHOLD STANDARDS & CALIBRATION SETTINGS
+       ========================================================================= -->
+  <div id="settingsModal" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="settingsModalTitle">
+    <div class="modal-card" style="max-width: 650px;">
+      <div class="modal-header">
+        <h3 id="settingsModalTitle" class="modal-title">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="3"></circle>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+          </svg>
+          Water Standards & Alert Thresholds
+        </h3>
+        <button id="btnCloseSettingsModal" class="modal-close-btn" aria-label="Close modal">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+      </div>
+
+      <div class="modal-body">
+        <div class="form-group">
+          <label class="form-label" for="settingPresetSelect">Select Standard Water Profile Preset</label>
+          <select id="settingPresetSelect" class="form-select">
+            <option value="drinking">Drinking Water (WHO / US EPA Standards)</option>
+            <option value="aquaculture">Aquaculture / Freshwater Fish Farming</option>
+            <option value="swimming">Swimming Pool Sanitation Standard</option>
+            <option value="environmental">River / Lake Environmental Monitoring</option>
+          </select>
+        </div>
+
+        <div class="form-grid-2">
+          <div class="form-group">
+            <label class="form-label" for="settingStationId">Station Unique ID</label>
+            <input type="text" id="settingStationId" class="form-input">
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="settingBrokerUrl">Cloud Broker WebSocket URL (WSS)</label>
+            <input type="text" id="settingBrokerUrl" class="form-input">
+          </div>
+        </div>
+
+        <h4 style="font-size: 0.9rem; color: var(--accent-cyan); margin-top: 0.5rem;">Safety Threshold Bounds</h4>
+        <div class="form-grid-2">
+          <div class="form-group">
+            <label class="form-label" for="threshPhMin">Min Safe pH</label>
+            <input type="number" step="0.1" id="threshPhMin" class="form-input">
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="threshPhMax">Max Safe pH</label>
+            <input type="number" step="0.1" id="threshPhMax" class="form-input">
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="threshTurbMax">Max Safe Turbidity (NTU)</label>
+            <input type="number" step="0.5" id="threshTurbMax" class="form-input">
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="threshTdsMax">Max Safe TDS (ppm)</label>
+            <input type="number" step="10" id="threshTdsMax" class="form-input">
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="threshTempMin">Min Water Temp (°C)</label>
+            <input type="number" step="1" id="threshTempMin" class="form-input">
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="threshTempMax">Max Water Temp (°C)</label>
+            <input type="number" step="1" id="threshTempMax" class="form-input">
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="document.getElementById('settingsModal').classList.remove('active')">Cancel</button>
+        <button id="btnSaveSettings" class="btn btn-primary">Save Changes</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Entry Script (ES Module) -->
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
